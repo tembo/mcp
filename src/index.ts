@@ -3,7 +3,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { TemboClient, TemboAPIError } from './client.js';
+import { createTemboClient } from './client.js';
 
 const TEMBO_API_KEY = process.env.TEMBO_API_KEY;
 const TEMBO_API_URL = process.env.TEMBO_API_URL || 'https://api.tembo.io';
@@ -13,7 +13,7 @@ if (!TEMBO_API_KEY) {
     process.exit(1);
 }
 
-const temboClient = new TemboClient({
+const temboClient = createTemboClient({
     apiKey: TEMBO_API_KEY,
     baseUrl: TEMBO_API_URL,
 });
@@ -59,9 +59,22 @@ server.registerTool(
     },
     async (args) => {
         try {
-            const result = await temboClient.createTask({
-                prompt: args.prompt,
-                description: args.description,
+            // Use prompt or description - SDK only accepts prompt
+            const prompt = args.prompt || args.description;
+            if (!prompt) {
+                return {
+                    content: [
+                        {
+                            type: 'text' as const,
+                            text: 'Error: Either prompt or description is required',
+                        },
+                    ],
+                    isError: true,
+                };
+            }
+
+            const result = await temboClient.task.create({
+                prompt,
                 repositories: args.repositories,
                 branch: args.branch,
                 agent: args.agent,
@@ -77,18 +90,15 @@ server.registerTool(
                 ],
             };
         } catch (error) {
-            if (error instanceof TemboAPIError) {
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `Error: ${error.message}`,
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-            throw error;
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
         }
     }
 );
@@ -117,7 +127,7 @@ server.registerTool(
     },
     async (args) => {
         try {
-            const result = await temboClient.listTasks({
+            const result = await temboClient.task.list({
                 limit: args.limit,
                 page: args.page,
             });
@@ -131,18 +141,15 @@ server.registerTool(
                 ],
             };
         } catch (error) {
-            if (error instanceof TemboAPIError) {
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `Error: ${error.message}`,
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-            throw error;
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
         }
     }
 );
@@ -172,7 +179,7 @@ server.registerTool(
     },
     async (args) => {
         try {
-            const result = await temboClient.searchTasks({
+            const result = await temboClient.task.search({
                 q: args.q,
                 limit: args.limit,
                 page: args.page,
@@ -187,18 +194,15 @@ server.registerTool(
                 ],
             };
         } catch (error) {
-            if (error instanceof TemboAPIError) {
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `Error: ${error.message}`,
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-            throw error;
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
         }
     }
 );
@@ -211,7 +215,7 @@ server.registerTool(
     },
     async () => {
         try {
-            const result = await temboClient.listRepositories();
+            const result = await temboClient.repository.list();
 
             return {
                 content: [
@@ -222,18 +226,15 @@ server.registerTool(
                 ],
             };
         } catch (error) {
-            if (error instanceof TemboAPIError) {
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `Error: ${error.message}`,
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-            throw error;
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
         }
     }
 );
@@ -246,7 +247,7 @@ server.registerTool(
     },
     async () => {
         try {
-            const result = await temboClient.getCurrentUser();
+            const result = await temboClient.me.retrieve();
 
             return {
                 content: [
@@ -257,18 +258,15 @@ server.registerTool(
                 ],
             };
         } catch (error) {
-            if (error instanceof TemboAPIError) {
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `Error: ${error.message}`,
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-            throw error;
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
         }
     }
 );
