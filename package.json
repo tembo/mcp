@@ -1,0 +1,31 @@
+{
+    "name": "tembo-mcp",
+    "version": "0.1.0",
+    "description": "MCP server for Tembo",
+    "type": "module",
+    "main": "dist/index.js",
+    "bin": {
+        "tembo-mcp": "dist/index.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "prepare": "npm run build"
+    },
+    "keywords": [
+        "mcp",
+        "tembo",
+        "ai",
+        "model-context-protocol"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.0.4",
+        "zod": "^3.23.8"
+    },
+    "devDependencies": {
+        "@types/node": "^20.17.10",
+        "typescript": "^5.7.2"
+    }
+}
