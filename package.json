@@ -1,12 +1,17 @@
 {
-    "name": "tembo-mcp",
+    "name": "@tembo-io/mcp",
     "version": "0.1.0",
     "description": "MCP server for Tembo",
     "type": "module",
     "main": "dist/index.js",
+    "types": "dist/index.d.ts",
     "bin": {
         "tembo-mcp": "dist/index.js"
     },
+    "files": [
+        "dist",
+        "README.md"
+    ],
     "scripts": {
         "build": "tsc",
         "dev": "tsc --watch",
@@ -20,6 +25,17 @@
     ],
     "author": "",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/tembo-io/tembo-mcp.git"
+    },
+    "homepage": "https://github.com/tembo-io/tembo-mcp#readme",
+    "bugs": {
+        "url": "https://github.com/tembo-io/tembo-mcp/issues"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.0.4",
         "@tembo-io/sdk": "^0.1.0",
