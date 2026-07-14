@@ -1,6 +1,6 @@
 {
     "name": "@tembo-io/mcp",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "MCP server for Tembo",
     "type": "module",
     "main": "dist/index.js",
@@ -10,12 +10,19 @@
     },
     "files": [
         "dist",
-        "README.md"
+        "README.md",
+        "LICENSE"
     ],
     "scripts": {
         "build": "tsc",
         "dev": "tsc --watch",
-        "prepare": "npm run build"
+        "typecheck": "tsc --noEmit",
+        "check": "biome check .",
+        "fix": "biome check --write .",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "prepare": "npm run build",
+        "prepublishOnly": "npm run check && npm run typecheck && npm test"
     },
     "keywords": [
         "mcp",
@@ -23,26 +30,31 @@
         "ai",
         "model-context-protocol"
     ],
-    "author": "",
+    "author": "Tembo (https://tembo.io)",
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/tembo-io/tembo-mcp.git"
+        "url": "git+https://github.com/tembo/mcp.git"
     },
-    "homepage": "https://github.com/tembo-io/tembo-mcp#readme",
+    "homepage": "https://github.com/tembo/mcp#readme",
     "bugs": {
-        "url": "https://github.com/tembo-io/tembo-mcp/issues"
+        "url": "https://github.com/tembo/mcp/issues"
     },
     "publishConfig": {
         "access": "public"
     },
+    "engines": {
+        "node": ">=20"
+    },
     "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.0.4",
-        "@tembo-io/sdk": "^0.1.0",
+        "@modelcontextprotocol/sdk": "^1.24.3",
+        "@tembo-io/sdk": "^0.1.3",
         "zod": "^3.23.8"
     },
     "devDependencies": {
+        "@biomejs/biome": "^2.5.3",
         "@types/node": "^20.17.10",
-        "typescript": "^5.7.2"
+        "typescript": "^5.7.2",
+        "vitest": "^4.1.10"
     }
 }
