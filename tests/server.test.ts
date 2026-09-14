@@ -31,7 +31,7 @@ before(async () => {
     const token = context.req.header('Authorization');
     if (token === 'Bearer revoked') return context.json({}, 401);
     if (token === 'Bearer removed') return context.json({}, 403);
-    if (token === 'Bearer missing-scopes') return context.json({ code: 'insufficient_scope', requiredScopes: ['user:org:read', 'tembo:read'] }, 403);
+    if (token === 'Bearer missing-scopes') return context.json({ code: 'insufficient_scope', requiredScopes: ['user:org:read'] }, 403);
     if (token === 'Bearer untrusted-scopes') return context.json({ code: 'insufficient_scope', requiredScopes: ['admin:all'] }, 403);
     if (token === 'Bearer unavailable') return context.json({}, 503);
     if (token === 'Bearer malformed') return context.json({ unexpected: true });
@@ -39,13 +39,12 @@ before(async () => {
       userId: token === 'Bearer other-user' ? 'user_b' : 'user_a',
       organizationId: token === 'Bearer other-user' ? 'org_b' : 'org_a',
       clientId: 'client_test',
-      scopes: ['user:org:read', 'tembo:read', ...(token === 'Bearer writer' ? ['tembo:write'] : [])],
+      scopes: ['user:org:read'],
       expiresAt: token === 'Bearer expired' ? 1 : Math.floor(Date.now() / 1000) + 3600,
     });
   });
   upstream.all('/public-api/*', async (context) => {
     const token = context.req.header('Authorization') ?? '';
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(context.req.method) && token !== 'Bearer writer') return context.json({}, 403);
     requests.push({ method: context.req.method, path: context.req.path, query: new URL(context.req.url).search, token, body: ['POST', 'PUT', 'PATCH'].includes(context.req.method) ? await context.req.json() : undefined });
     if (context.req.path.endsWith('/forbidden')) return context.json({ token: 'secret-do-not-return', error: 'private internals' }, 403);
     return context.json({ ok: true });
@@ -124,15 +123,13 @@ describe('OpenAPI-generated MCP', () => {
     }
   });
 
-  it('keeps full discovery while requiring write consent before a mutation reaches the API', async () => {
+  it('permits approved OAuth clients to call public mutations', async () => {
     const listed = await (await rpc('tools/list')).json();
     assert.equal(listed.result.tools.length, 10);
     const response = await rpc('tools/call', { name: toolName('DELETE', '/v1/widgets/{widgetId}'), arguments: { widgetId: 'widget-1' } });
-    assert.equal(response.status, 403);
-    assert.match(response.headers.get('www-authenticate') ?? '', /error="insufficient_scope"/);
-    assert.match(response.headers.get('www-authenticate') ?? '', /scope="user:org:read tembo:read tembo:write"/);
-    assert.deepEqual((await response.json()).requiredScopes, ['user:org:read', 'tembo:read', 'tembo:write']);
-    assert.equal(requests.length, 0);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).result.isError, undefined);
+    assert.equal(requests.length, 1);
   });
 
   it('does not share caller credentials across concurrent requests', async () => {
@@ -159,14 +156,14 @@ describe('OAuth transport', () => {
     const response = await app.request('/.well-known/oauth-protected-resource/mcp', { headers: { Host: 'attacker.example.com' } });
     const metadata = await response.json();
     assert.equal(metadata.resource, config.publicUrl);
-    assert.deepEqual(metadata.scopes_supported, ['user:org:read', 'tembo:read']);
+    assert.deepEqual(metadata.scopes_supported, ['user:org:read']);
   });
   it('challenges missing or malformed credentials', async () => {
     for (const authorization of ['', 'Basic test', 'Bearer token extra']) {
       const response = await app.request('/mcp', { method: 'POST', headers: { Authorization: authorization } });
       assert.equal(response.status, 401);
       assert.match(response.headers.get('www-authenticate') ?? '', /resource_metadata=/);
-      assert.match(response.headers.get('www-authenticate') ?? '', /scope="user:org:read tembo:read"/);
+      assert.match(response.headers.get('www-authenticate') ?? '', /scope="user:org:read"/);
     }
   });
   it('distinguishes invalid grants, missing access, and provider outages', async () => {
@@ -186,7 +183,7 @@ describe('OAuth transport', () => {
     const response = await rpc('tools/list', {}, 'missing-scopes');
     assert.equal(response.status, 403);
     assert.match(response.headers.get('www-authenticate') ?? '', /error="insufficient_scope"/);
-    assert.match(response.headers.get('www-authenticate') ?? '', /scope="user:org:read tembo:read"/);
+    assert.match(response.headers.get('www-authenticate') ?? '', /scope="user:org:read"/);
   });
   it('rejects query credentials even when a valid header is present', async () => {
     for (const query of ['access_token=secret', 'token=secret', 'state=secret']) {
@@ -261,17 +258,13 @@ describe('Canonical generated server', () => {
     assert.equal(requests.length, 0);
   });
 
-  it('executes compact reads, requires write consent, and validates arguments', async () => {
+  it('executes compact reads and writes with argument validation', async () => {
     const compact = await createApp({ ...config, toolMode: 'compact' }, JSON.stringify(spec));
     const writeName = toolName('POST', '/v1/widgets');
     const details = await (await rpc('tools/call', { name: 'get_tool_schema', arguments: { name: writeName } }, 'reader', compact)).json();
     assert.equal(details.result.structuredContent.data.annotations.destructiveHint, true);
     assert.ok(details.result.structuredContent.data.inputSchema.required.includes('content'));
     const input = { name: 'call_write_tool', arguments: { name: writeName, arguments: { content: 'new' } } };
-    const denied = await rpc('tools/call', input, 'reader', compact);
-    assert.equal(denied.status, 403);
-    assert.match(denied.headers.get('www-authenticate') ?? '', /tembo:write/);
-    assert.equal(requests.length, 0);
     const wrongChannel = await (await rpc('tools/call', { ...input, name: 'call_read_tool' }, 'writer', compact)).json();
     assert.equal(wrongChannel.result.isError, true);
     const invalid = await (await rpc('tools/call', { name: 'call_write_tool', arguments: { name: writeName, arguments: { content: 42 } } }, 'writer', compact)).json();

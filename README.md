@@ -4,7 +4,7 @@ The Model Context Protocol interface to the **full Tembo public API**, generated
 
 One package, one generated catalog, two standard transports:
 
-- **Hosted Streamable HTTP:** Clerk OAuth, organization-scoped identity, read-first consent, and explicit write authorization.
+- **Hosted Streamable HTTP:** Clerk OAuth, organization-scoped identity, and full public API access for explicitly approved OAuth clients.
 - **Local stdio:** the same tools through `@tembo-io/mcp`, using your API key. Read-only unless you pass `--allow-writes`.
 
 Both transports use the official MCP TypeScript SDK v2 serving entries and support the `2026-07-28` protocol plus legacy clients using the `2025-11-25` handshake. The old five-tool implementation is replaced, not maintained as a separate server.
@@ -64,22 +64,22 @@ cp .env.example .env
 npm run dev
 ```
 
-For production, inject the environment and run `npm start` or the container. Configure clients with your deployed `/mcp` URL; the initial 401 response points them to public OAuth protected-resource metadata and requests the baseline read scopes.
+For production, inject the environment and run `npm start` or the container. Configure clients with your deployed `/mcp` URL; the initial 401 response points them to public OAuth protected-resource metadata and requests the organization-selection scope.
 
-Clerk handles login, consent, client registration, and refresh. The companion API integration verifies JWT issuer, audience, signature, expiry, grant scopes, and current organization membership. The hosted MCP process never stores a shared API key or Clerk secret.
+Clerk handles login, consent, and refresh. The companion API uses the Clerk SDK to verify opaque access tokens, checks approved client IDs and expiry, resolves the selected organization through Clerk userinfo, and checks current membership. The hosted MCP process never stores a shared API key or Clerk secret.
 
 Deployment requires the companion [API OAuth changes](https://github.com/tembo/monorepo/pull/11327). Configure that API with:
 
 ```dotenv
 MCP_OAUTH_ISSUER=https://your-instance.clerk.accounts.dev
-MCP_OAUTH_RESOURCE=https://your-mcp-host.example/mcp
+MCP_OAUTH_CLIENT_IDS=your-approved-clerk-oauth-client-id
 ```
 
-The API's resource must exactly equal this server's `MCP_PUBLIC_URL`. The MCP endpoint and backing public API deliberately form one protected resource; never disable audience verification to accommodate an incompatible client.
+The API reuses its existing `CLERK_SECRET_KEY`. `MCP_OAUTH_CLIENT_IDS` is a comma-separated allowlist of Clerk OAuth applications approved for full public API access. An empty list disables OAuth access. Only approve dedicated clients you control; this is client approval, not JWT resource-audience validation.
 
-In Clerk, enable Organizations and consent, configure public clients with PKCE, and select a reviewed client-registration policy for the clients you support. Create/assign `tembo:read` and `tembo:write`; `user:org:read` enables organization selection. Initial consent is `user:org:read tembo:read`. A write attempt without permission returns HTTP 403 with the required scopes in `WWW-Authenticate`; clients need step-up authorization support or an explicit reconnection with write scopes. Removed membership does not produce a misleading scope escalation challenge.
+In Clerk, enable Organizations and consent and register supported public clients with exact redirect URIs and PKCE S256. Request `user:org:read` to select an organization. Clerk's development discovery did not advertise dynamic client registration: do not assume arbitrary MCP clients can register automatically. Use clients that support pre-registered OAuth credentials and validate their login flow before rollout.
 
-`tembo:write` is broad: credential creation, billing changes, deletion, and agent execution may be available when the user's existing API permissions permit them. Make that clear during consent. No tool automatically retries a failed mutation.
+**Hosted OAuth grants full public API access within the selected organization**, subject to existing user permissions. This includes writes, credential creation, billing changes, deletion, and agent execution. Make that clear in the OAuth application's name/description and client approval policy. There are no custom `tembo:*` scopes or read-to-write step-up flow. MCP tool approval remains the client's responsibility. No tool automatically retries a failed mutation.
 
 ## Configuration
 
@@ -94,7 +94,7 @@ In Clerk, enable Organizations and consent, configure public clients with PKCE, 
 | `HOST` | HTTP | `127.0.0.1`; container sets `0.0.0.0` |
 | `PORT` | HTTP | `3000` |
 
-`--transport stdio` is the CLI default. `--transport http` starts the hosted server. `--allow-writes` is only valid for stdio; HTTP write permissions always come from OAuth.
+`--transport stdio` is the CLI default. `--transport http` starts the hosted server. `--allow-writes` is only valid for stdio; HTTP access comes from the approved OAuth client and existing API permissions.
 
 ```sh
 docker build -t tembo-mcp .
@@ -131,6 +131,6 @@ Tests cover current and legacy HTTP/stdio clients, generated CRUD, composed sche
 
 ## Rollout boundary
 
-The code is the main implementation, not a parallel preview. Merging it does not deploy a host, publish npm, or configure Clerk. Before enabling production, test real client login, org selection, consent denial, write step-up, refresh, cross-org access, membership removal, and revocation. Do not promise immediate JWT revocation without verifying Clerk's behavior.
+The code is the main implementation, not a parallel preview. Merging it does not deploy a host, publish npm, or configure Clerk. Before enabling production, test real client login, org selection, consent denial, refresh, cross-org access, membership removal, and revocation. The API checks Clerk's current grant and organization membership on each request.
 
 Deploy behind HTTPS and edge rate limits. Review upstream redirect policy and egress restrictions, and monitor provider failures without logging credentials or payloads. See [SECURITY.md](SECURITY.md).

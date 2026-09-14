@@ -2,11 +2,10 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { createMcpHandler } from '@modelcontextprotocol/server';
-import { CallToolRequestSchema } from '@modelcontextprotocol/core';
 import { AuthenticationError, BASE_SCOPES, verifyIdentity } from './api.js';
 import type { Config } from './config.js';
 import { createCatalog } from './openapi.js';
-import { createServer, requiresWrite } from './server.js';
+import { createServer } from './server.js';
 
 export async function createApp(config: Config, openapi: string) {
   const app = new Hono();
@@ -15,7 +14,7 @@ export async function createApp(config: Config, openapi: string) {
   const catalog = await createCatalog(openapi, config.apiUrl);
   const handler = createMcpHandler(({ authInfo }) => {
     if (!authInfo) throw new Error('Missing verified identity');
-    return createServer(catalog, { apiUrl: config.apiUrl, token: authInfo.token, mode: config.toolMode, allowWrites: authInfo.scopes.includes('tembo:write') });
+    return createServer(catalog, { apiUrl: config.apiUrl, token: authInfo.token, mode: config.toolMode, allowWrites: true });
   });
   const challenge = (error?: string, scopes?: string[]) => [
     `Bearer resource_metadata="${metadataUrl}"`,
@@ -77,15 +76,6 @@ export async function createApp(config: Config, openapi: string) {
         context.header('WWW-Authenticate', challenge('insufficient_scope', error.requiredScopes));
       }
       return context.json({ error: status === 503 ? 'Tembo authentication temporarily unavailable' : 'Tembo authorization required' }, status);
-    }
-
-    if (context.req.method === 'POST') {
-      const request = CallToolRequestSchema.safeParse(await context.req.raw.clone().json().catch(() => null));
-      if (request.success && requiresWrite(catalog, config.toolMode, request.data.params.name) && !identity.scopes.includes('tembo:write')) {
-        const requiredScopes = [...BASE_SCOPES, 'tembo:write'];
-        context.header('WWW-Authenticate', challenge('insufficient_scope', requiredScopes));
-        return context.json({ error: 'Write access requires explicit consent', code: 'insufficient_scope', requiredScopes }, 403);
-      }
     }
 
     return handler.fetch(context.req.raw, {

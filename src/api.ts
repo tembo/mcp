@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
-export const BASE_SCOPES = ['user:org:read', 'tembo:read'];
+export const BASE_SCOPES = ['user:org:read'];
 
 const scopeErrorSchema = z.object({
   code: z.literal('insufficient_scope'),
-  requiredScopes: z.array(z.enum(['user:org:read', 'tembo:read', 'tembo:write'])).min(1).max(3),
+  requiredScopes: z.array(z.literal('user:org:read')).min(1).max(1),
 });
 
 export const identitySchema = z.object({
@@ -44,7 +44,7 @@ export async function verifyIdentity(apiUrl: string, token: string): Promise<Ide
   const result = identitySchema.safeParse(await response.json().catch(() => null));
   if (!result.success) throw new AuthenticationError(503);
   if (result.data.expiresAt <= Date.now() / 1000) throw new AuthenticationError(401);
-  if (!result.data.scopes.includes('tembo:read') || !result.data.scopes.includes('user:org:read')) {
+  if (!result.data.scopes.includes('user:org:read')) {
     throw new AuthenticationError(403, BASE_SCOPES);
   }
   return result.data;
