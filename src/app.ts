@@ -1,20 +1,22 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
-import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { ToolsManager, type ExtendedTool } from '@ivotoby/openapi-mcp-server';
+import { createMcpHandler } from '@modelcontextprotocol/server';
+import { CallToolRequestSchema } from '@modelcontextprotocol/core';
 import { AuthenticationError, BASE_SCOPES, verifyIdentity } from './api.js';
 import type { Config } from './config.js';
-import { createGeneratedServer, generatorConfig } from './openapi.js';
+import { createCatalog } from './openapi.js';
+import { createServer, requiresWrite } from './server.js';
 
 export async function createApp(config: Config, openapi: string) {
   const app = new Hono();
   const publicUrl = new URL(config.publicUrl);
   const metadataUrl = `${publicUrl.origin}/.well-known/oauth-protected-resource/mcp`;
-  const tools = new ToolsManager(generatorConfig(openapi, config.apiUrl));
-  await tools.initialize();
-  const catalog = new Map((tools.getAllTools() as ExtendedTool[]).map((tool) => [tool.name, tool]));
+  const catalog = await createCatalog(openapi, config.apiUrl);
+  const handler = createMcpHandler(({ authInfo }) => {
+    if (!authInfo) throw new Error('Missing verified identity');
+    return createServer(catalog, { apiUrl: config.apiUrl, token: authInfo.token, mode: config.toolMode, allowWrites: authInfo.scopes.includes('tembo:write') });
+  });
   const challenge = (error?: string, scopes?: string[]) => [
     `Bearer resource_metadata="${metadataUrl}"`,
     ...(error ? [`error="${error}"`] : []),
@@ -22,9 +24,9 @@ export async function createApp(config: Config, openapi: string) {
   ].join(', ');
 
   app.use('*', cors({
-    origin: publicUrl.origin,
+    origin: config.allowedOrigins,
     allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Authorization', 'Content-Type', 'MCP-Protocol-Version', 'Mcp-Session-Id'],
+    allowHeaders: ['Authorization', 'Content-Type', 'MCP-Protocol-Version', 'Mcp-Method', 'Mcp-Name', 'Mcp-Session-Id'],
     exposeHeaders: ['WWW-Authenticate', 'MCP-Protocol-Version'],
   }));
   app.get('/health', (context) => context.json({ status: 'ok' }));
@@ -42,6 +44,7 @@ export async function createApp(config: Config, openapi: string) {
   app.use('/mcp', async (context, next) => {
     context.header('Cache-Control', 'no-store');
     await next();
+    context.header('Cache-Control', 'no-store');
   });
   app.use('/mcp', bodyLimit({
     maxSize: 256 * 1024,
@@ -49,7 +52,7 @@ export async function createApp(config: Config, openapi: string) {
   }));
   app.all('/mcp', async (context) => {
     const origin = context.req.header('Origin');
-    if (origin && origin !== publicUrl.origin) return context.json({ error: 'Origin not allowed' }, 403);
+    if (origin && !config.allowedOrigins.includes(origin)) return context.json({ error: 'Origin not allowed' }, 403);
     if (!['POST', 'GET', 'DELETE'].includes(context.req.method)) {
       context.header('Allow', 'POST, GET, DELETE, OPTIONS');
       return context.json({ error: 'Method not allowed' }, 405);
@@ -78,22 +81,14 @@ export async function createApp(config: Config, openapi: string) {
 
     if (context.req.method === 'POST') {
       const request = CallToolRequestSchema.safeParse(await context.req.raw.clone().json().catch(() => null));
-      const tool = request.success ? catalog.get(request.data.params.name) : undefined;
-      if (tool && !['get', 'head', 'options'].includes(tool.httpMethod?.toLowerCase() ?? '') && !identity.scopes.includes('tembo:write')) {
+      if (request.success && requiresWrite(catalog, config.toolMode, request.data.params.name) && !identity.scopes.includes('tembo:write')) {
         const requiredScopes = [...BASE_SCOPES, 'tembo:write'];
         context.header('WWW-Authenticate', challenge('insufficient_scope', requiredScopes));
         return context.json({ error: 'Write access requires explicit consent', code: 'insufficient_scope', requiredScopes }, 403);
       }
     }
 
-    const server = createGeneratedServer(openapi, config.apiUrl, token);
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
-    try {
-      await server.start(transport);
-      return await transport.handleRequest(context.req.raw, {
+    return handler.fetch(context.req.raw, {
         authInfo: {
           token,
           clientId: identity.clientId,
@@ -102,10 +97,7 @@ export async function createApp(config: Config, openapi: string) {
           resource: publicUrl,
           extra: { userId: identity.userId, organizationId: identity.organizationId },
         },
-      });
-    } finally {
-      await transport.close();
-    }
+    });
   });
   app.onError(() => new Response('Internal server error', { status: 500 }));
   return app;

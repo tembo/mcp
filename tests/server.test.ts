@@ -2,13 +2,12 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { ToolsManager } from '@ivotoby/openapi-mcp-server';
 import type { ExtendedTool } from '@ivotoby/openapi-mcp-server';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
-import { generatorConfig, loadOpenApi } from '../src/openapi.js';
+import { createCatalog, generatorConfig, loadOpenApi } from '../src/openapi.js';
 import { spec } from './spec.js';
 
 const requests: { method: string; path: string; query: string; token: string; body?: unknown }[] = [];
@@ -54,17 +53,17 @@ before(async () => {
   await new Promise<void>((resolve) => { backend = serve({ fetch: upstream.fetch, hostname: '127.0.0.1', port: 0 }, () => resolve()); });
   const address = backend.address();
   assert.ok(address && typeof address === 'object');
-  config = loadConfig({ MCP_PUBLIC_URL: 'http://localhost:3000/mcp', MCP_OAUTH_ISSUER: 'https://clerk.example.com', TEMBO_API_URL: `http://127.0.0.1:${address.port}/public-api` });
+  config = loadConfig({ MCP_PUBLIC_URL: 'http://localhost:3000/mcp', MCP_OAUTH_ISSUER: 'https://clerk.example.com', TEMBO_API_URL: `http://127.0.0.1:${address.port}/public-api`, MCP_TOOL_MODE: 'all' });
   app = await createApp(config, await loadOpenApi(config));
 });
 beforeEach(() => { requests.length = 0; specResponse = spec; });
 after(async () => { await new Promise<void>((resolve) => backend.close(() => resolve())); });
 
-async function rpc(method: string, params: unknown = {}, token = 'reader') {
-  return app.request('/mcp', {
+async function rpc(method: string, params: Record<string, unknown> = {}, token = 'reader', application = app) {
+  return application.request('/mcp', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(typeof params.name === 'string' ? { 'Mcp-Name': params.name } : {}) },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} } } }),
   });
 }
 
@@ -114,7 +113,7 @@ describe('OpenAPI-generated MCP', () => {
   it('discovers a newly published operation on restart without tool code changes', async () => {
     specResponse = { ...spec, paths: { ...spec.paths, '/v1/another-new-endpoint': { get: { operationId: 'anotherNewEndpoint', responses: { '200': { description: 'ok' } } } } } };
     const updated = await createApp(config, await loadOpenApi(config));
-    const response = await updated.request('/mcp', { method: 'POST', headers: { Authorization: 'Bearer writer', 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+    const response = await rpc('tools/list', {}, 'writer', updated);
     assert.equal((await response.json()).result.tools.length, 11);
   });
 
@@ -208,5 +207,112 @@ describe('OAuth transport', () => {
     for (const apiUrl of ['http://api.example.com', 'https://user:pass@api.example.com', 'https://api.example.com?redirect=1']) {
       assert.throws(() => loadConfig({ MCP_PUBLIC_URL: 'http://localhost:3000/mcp', MCP_OAUTH_ISSUER: 'https://clerk.example.com', TEMBO_API_URL: apiUrl }));
     }
+  });
+});
+
+describe('Canonical generated server', () => {
+  it('paginates individual generated tools without losing operations', async () => {
+    const extraPaths = Object.fromEntries(Array.from({ length: 55 }, (unused, index) => [`/v1/extra-${index}`, { get: { operationId: `getExtra${index}`, responses: { 200: { description: 'OK' } } } }]));
+    const expanded = await createApp(config, JSON.stringify({ ...spec, paths: { ...spec.paths, ...extraPaths } }));
+    const first = await (await rpc('tools/list', {}, 'reader', expanded)).json();
+    const second = await (await rpc('tools/list', { cursor: first.result.nextCursor }, 'reader', expanded)).json();
+    assert.equal(first.result.tools.length, 50);
+    assert.equal(second.result.tools.length, 15);
+    assert.equal(second.result.nextCursor, undefined);
+    assert.equal(new Set([...first.result.tools, ...second.result.tools].map((tool: { name: string }) => tool.name)).size, 65);
+  });
+
+  it('rejects dot-segment path arguments before dispatch', async () => {
+    for (const widgetId of ['.', '..']) {
+      const result = await (await rpc('tools/call', { name: toolName('GET', '/v1/widgets/{widgetId}'), arguments: { widgetId } })).json();
+      assert.equal(result.result.isError, true);
+    }
+    assert.equal(requests.length, 0);
+  });
+
+  it('negotiates the current protocol through the official SDK', async () => {
+    const client = new Client({ name: 'modern-test', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+    const transport = new StreamableHTTPClientTransport(new URL('http://localhost:3000/mcp'), {
+      requestInit: { headers: { Authorization: 'Bearer reader' } },
+      fetch: async (input, init) => app.request(new Request(input, init)),
+    });
+    try {
+      await client.connect(transport);
+      assert.equal(client.getProtocolEra(), 'modern');
+      const tools = await client.listTools();
+      assert.equal(tools.tools.length, 10);
+      assert.ok(tools.tools.every((tool) => tool.annotations && tool.outputSchema));
+      const response = await client.callTool({ name: toolName('GET', '/v1/billing'), arguments: {} });
+      assert.deepEqual(response.structuredContent, { data: { ok: true } });
+    } finally { await client.close(); }
+  });
+
+  it('provides four compact tools and paginates the entire generated catalog', async () => {
+    const compact = await createApp({ ...config, toolMode: 'compact' }, JSON.stringify(spec));
+    const listed = await (await rpc('tools/list', {}, 'reader', compact)).json();
+    assert.deepEqual(listed.result.tools.map((tool: { name: string }) => tool.name), ['search_tools', 'get_tool_schema', 'call_read_tool', 'call_write_tool']);
+    const names: string[] = [];
+    for (let offset = 0; offset < 10; offset += 2) {
+      const result = await (await rpc('tools/call', { name: 'search_tools', arguments: { limit: 2, offset } }, 'reader', compact)).json();
+      assert.equal(result.result.structuredContent.data.total, 10);
+      names.push(...result.result.structuredContent.data.tools.map((tool: { name: string }) => tool.name));
+    }
+    assert.deepEqual(new Set(names), new Set(tools.getAllTools().map((tool) => tool.name)));
+    assert.equal(requests.length, 0);
+  });
+
+  it('executes compact reads, requires write consent, and validates arguments', async () => {
+    const compact = await createApp({ ...config, toolMode: 'compact' }, JSON.stringify(spec));
+    const writeName = toolName('POST', '/v1/widgets');
+    const details = await (await rpc('tools/call', { name: 'get_tool_schema', arguments: { name: writeName } }, 'reader', compact)).json();
+    assert.equal(details.result.structuredContent.data.annotations.destructiveHint, true);
+    assert.ok(details.result.structuredContent.data.inputSchema.required.includes('content'));
+    const input = { name: 'call_write_tool', arguments: { name: writeName, arguments: { content: 'new' } } };
+    const denied = await rpc('tools/call', input, 'reader', compact);
+    assert.equal(denied.status, 403);
+    assert.match(denied.headers.get('www-authenticate') ?? '', /tembo:write/);
+    assert.equal(requests.length, 0);
+    const wrongChannel = await (await rpc('tools/call', { ...input, name: 'call_read_tool' }, 'writer', compact)).json();
+    assert.equal(wrongChannel.result.isError, true);
+    const invalid = await (await rpc('tools/call', { name: 'call_write_tool', arguments: { name: writeName, arguments: { content: 42 } } }, 'writer', compact)).json();
+    assert.equal(invalid.result.isError, true);
+    assert.equal(requests.length, 0);
+    const written = await (await rpc('tools/call', input, 'writer', compact)).json();
+    assert.deepEqual(written.result.structuredContent, { data: { ok: true } });
+    assert.deepEqual(requests[0]?.body, { content: 'new' });
+    const read = await rpc('tools/call', { name: 'call_read_tool', arguments: { name: toolName('GET', '/v1/billing') } }, 'reader', compact);
+    assert.equal(read.headers.get('cache-control'), 'no-store');
+    assert.deepEqual((await read.json()).result.structuredContent, { data: { ok: true } });
+  });
+
+  it('supports closed union request bodies alongside path parameters', async () => {
+    const unionSpec = { ...spec, paths: { ...spec.paths, '/v1/connections/{connectionId}': {
+      parameters: [{ name: 'connectionId', in: 'path', required: true, schema: { type: 'string' } }],
+      patch: { operationId: 'updateConnection', requestBody: { required: true, content: { 'application/json': { schema: { anyOf: [
+        { type: 'object', properties: { type: { const: 'local', type: 'string' }, command: { type: 'string' } }, required: ['type', 'command'], additionalProperties: false },
+        { type: 'object', properties: { type: { const: 'remote', type: 'string' }, url: { type: 'string' } }, required: ['type', 'url'], additionalProperties: false },
+      ] } } } }, responses: { 200: { description: 'OK' } } },
+    } } };
+    const content = JSON.stringify(unionSpec);
+    const catalog = await createCatalog(content, config.apiUrl);
+    const name = catalog.entries.find((entry) => entry.path === '/v1/connections/{connectionId}')!.tool.name;
+    const updated = await createApp(config, content);
+    const result = await (await rpc('tools/call', { name, arguments: { connectionId: 'id-1', type: 'local', command: 'test' } }, 'writer', updated)).json();
+    assert.equal(result.result.isError, undefined);
+    assert.equal(requests[0]?.path, '/public-api/v1/connections/id-1');
+    assert.deepEqual(requests[0]?.body, { type: 'local', command: 'test' });
+    const invalid = await (await rpc('tools/call', { name, arguments: { connectionId: 'id-1', type: 'local', url: 'wrong-variant' } }, 'writer', updated)).json();
+    assert.equal(invalid.result.isError, true);
+    assert.equal(requests.length, 1);
+  });
+
+  it('rejects an HTTP routing header that disagrees with the modern request', async () => {
+    const response = await app.request('/mcp', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer reader', 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} } } }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(requests.length, 0);
   });
 });

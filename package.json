@@ -1,48 +1,61 @@
 {
-    "name": "@tembo-io/mcp",
-    "version": "0.1.0",
-    "description": "MCP server for Tembo",
-    "type": "module",
-    "main": "dist/index.js",
-    "types": "dist/index.d.ts",
-    "bin": {
-        "tembo-mcp": "dist/index.js"
-    },
-    "files": [
-        "dist",
-        "README.md"
-    ],
-    "scripts": {
-        "build": "tsc",
-        "dev": "tsc --watch",
-        "prepare": "npm run build"
-    },
-    "keywords": [
-        "mcp",
-        "tembo",
-        "ai",
-        "model-context-protocol"
-    ],
-    "author": "",
-    "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/tembo-io/tembo-mcp.git"
-    },
-    "homepage": "https://github.com/tembo-io/tembo-mcp#readme",
-    "bugs": {
-        "url": "https://github.com/tembo-io/tembo-mcp/issues"
-    },
-    "publishConfig": {
-        "access": "public"
-    },
-    "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.0.4",
-        "@tembo-io/sdk": "^0.1.0",
-        "zod": "^3.23.8"
-    },
-    "devDependencies": {
-        "@types/node": "^20.17.10",
-        "typescript": "^5.7.2"
-    }
+  "name": "@tembo-io/mcp",
+  "version": "0.2.0",
+  "description": "OpenAPI-generated Tembo MCP with Clerk OAuth, HTTP and stdio",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "tembo-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SECURITY.md",
+    ".env.example"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx --env-file=.env src/index.ts --transport http",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "start": "node dist/index.js --transport http",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "check:coverage": "tsx scripts/check-coverage.ts",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "tembo",
+    "openapi",
+    "model-context-protocol"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tembo/mcp.git"
+  },
+  "homepage": "https://github.com/tembo/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/tembo/mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.9",
+    "@ivotoby/openapi-mcp-server": "^1.16.1",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/core": "^2.0.0",
+    "hono": "^4.13.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
 }

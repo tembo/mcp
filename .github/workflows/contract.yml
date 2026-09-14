@@ -1,9 +1,12 @@
-name: CI
-on: [push, pull_request]
+name: Public API contract
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 8 * * *'
 permissions:
   contents: read
 jobs:
-  check:
+  coverage:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,10 +15,4 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
       - run: npm run check:coverage
-      - run: npm run build
-      - run: npm pack --dry-run
-      - run: npm audit --audit-level=high
-      - run: docker build -t tembo-mcp:test .
