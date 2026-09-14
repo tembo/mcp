@@ -8,6 +8,17 @@ An [MCP server](https://spec.modelcontextprotocol.io/) for the [Tembo](https://t
 
 ## Features
 
+This repository contains two entry points:
+
+| Server | Authentication | API coverage | Status |
+| --- | --- | --- | --- |
+| Local stdio package (this page) | API key | Five existing tools | Existing entry point, unchanged |
+| [Hosted server](remote/README.md) | Clerk OAuth | Generated from the full public OpenAPI spec | Preview; not deployed |
+
+The hosted server lives in `remote/` with its own dependencies and Docker build. It starts with read-only consent and challenges writes for additional scope. It requires the companion API OAuth changes in [tembo/monorepo#11327](https://github.com/tembo/monorepo/pull/11327). See its README for protocol support and remaining launch checks; it is not a replacement for the existing `npx` command yet.
+
+### Existing local tools
+
 This MCP server provides the following tools:
 
 - **create_task** - Create new tasks in Tembo with optional repository and branch targeting
