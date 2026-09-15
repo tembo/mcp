@@ -107,7 +107,7 @@ At startup the server reads the versioned `openapi/openapi.json` bundled in npm 
 
 Startup checks that all public operations generate unique tools. `npm run update:openapi` fetches the canonical public contract and validates coverage and schemas before updating the snapshot. The update workflow opens or updates a review PR on `production-api-deployed` repository dispatch, manual invocation on main, or a daily fallback. Unchanged schemas produce no diff. Merge the reviewed snapshot, then release/redeploy MCP; restarting an old release does not change its tools. SDK releases are independent.
 
-Automation requires the public CI GitHub App installed on this repository with contents and pull-request write permissions, `CI_PUBLIC_BOT_APP_ID` as a repository variable, and `CI_PUBLIC_BOT_PRIVATE_KEY` as a secret (reuse the SDK/docs bot). The monorepo must separately send the deployment dispatch to this repository; until wired, use the manual or daily trigger. This PR does not add a deployment or npm-publishing workflow.
+Automation requires the public CI GitHub App installed on this repository with contents and pull-request write permissions, `CI_PUBLIC_BOT_APP_ID` as a repository variable, and `CI_PUBLIC_BOT_PRIVATE_KEY` as a secret (reuse the SDK/docs bot). The companion monorepo workflow sends `production-api-deployed` independently to this repo and the SDK after a successful production API rollout. Its existing `CI_BOT_APP_ID`/`CI_BOT_PRIVATE_KEY` bot must also be installed on `tembo/mcp` with contents write permission to send that event. Until both PRs are merged and configured, use the manual schema-update trigger. npm publication remains separate.
 
 The coverage check currently validates **125 public operations** against generation and schema compilation. It does not call authenticated customer endpoints or prove that every possible request encoding works. New content types and unusual schemas need serialization regression tests. Internal routes and the existing sandbox-only MCP endpoint are not part of this public contract.
 
@@ -125,6 +125,34 @@ npm audit
 ```
 
 Tests cover current and legacy HTTP/stdio clients, generated CRUD, composed schemas, compact discovery, scope challenges, argument validation, caller isolation, and offline schema loading. CI checks the committed snapshot, not a changing production schema. Only the schema-update workflow fetches the deployed contract; it never calls customer operations.
+
+## Image publishing and deployment
+
+The `Publish MCP image` workflow runs manually on `main` or when a GitHub release is published. It requires the source commit to be on main, runs tests, typecheck, schema coverage, and dependency audit, then publishes a Linux amd64 image to the shared ECR repository `tembo-mcp`. The image tag is the **full 40-character MCP commit SHA**, not the monorepo commit or a mutable `latest` tag. Rerunning a publication reuses the existing immutable image. The workflow summary records its tag and digest. Publishing does not deploy anything or publish npm.
+
+Before publishing, configure the `release` GitHub environment in this repo:
+
+- Set `ECR_REPO_PREFIX` to the shared registry host and `ECR_ROLE_ARN` to the publishing role, as repository or environment variables.
+- Have infra create `tembo-mcp` in the shared registry in `us-east-1`, with immutable SHA tags and mutable `*.mcp` environment tags, matching the existing ECR pattern.
+- Scope the publishing role's GitHub OIDC trust to `repo:tembo/mcp:environment:release`. Give it ECR push/pull and image lookup permissions for `tembo-mcp`, not ECS deployment permissions. No long-lived AWS credentials are needed.
+- Protect the `release` environment with approved branch/tag rules and required reviewers. The separate check job runs without AWS credentials.
+
+The monorepo's manual `Deploy MCP` workflow accepts `environment` (`dev`, `staging`, or `prod`) and the image SHA. It reuses `deploy-ecs.yaml`, including its rollout/stability checks and environment tagging. It uses the existing monorepo environment roles/registry variables and maps dev to the `test` GitHub environment, staging to `staging`, and prod to `production`. Production approval is controlled by that existing GitHub environment; verify its required-reviewer policy before launch. Deployments run only from monorepo main and serialize per environment. The same image can be promoted without rebuilding; rollback selects a previous published SHA.
+
+Infra must provision the following contract before running deployment (no resources are created by these workflows):
+
+| Resource | Expected value |
+| --- | --- |
+| ECS clusters | `tembo-use1-{dev,staging,prod}-api` |
+| Service and task-definition family | `tembo-use1-{dev,staging,prod}-mcp` |
+| Container name | `tembo-mcp` |
+| Container port / health path | `3000` / `/health` |
+| Runtime environment | `MCP_PUBLIC_URL`, `MCP_OAUTH_ISSUER`, `TEMBO_API_URL`; image defaults `HOST=0.0.0.0` |
+| Public routing | Host routing to both `/mcp` and `/.well-known/oauth-protected-resource*`; production vanity domain `mcp.tembo.io` |
+
+Use each environment's own API URL and Clerk issuer. The MCP container needs no Clerk secret, database credentials, or shared API key. Ensure the task execution role can pull the shared ECR image and deploy/tagging roles can access the new service/repository. Configure TLS, rate limits, logs, and streaming timeouts in infra. Create registry/IAM first, publish an initial image, then provision services using that image and promote through dev, staging, and production.
+
+Schema review and deployment are intentionally separate: API deploy → schema PR → review/merge → publish image → deploy that SHA. No schema-update event can automatically deploy production.
 
 ## Migration from 0.1.x
 

@@ -7,6 +7,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check workflows
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12
       - uses: actions/setup-node@v4
         with:
           node-version: 22
