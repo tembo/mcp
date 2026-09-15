@@ -1,4 +1,5 @@
 import { ToolsManager } from '@ivotoby/openapi-mcp-server';
+import { readFile } from 'node:fs/promises';
 import type { ExtendedTool, OpenAPIMCPServerConfig } from '@ivotoby/openapi-mcp-server';
 import type { Tool } from '@modelcontextprotocol/server';
 import { ToolSchema } from '@modelcontextprotocol/core';
@@ -21,18 +22,18 @@ export function generatorConfig(spec: string, apiUrl: string): OpenAPIMCPServerC
   };
 }
 
-export async function loadOpenApi(config: Pick<Config, 'apiUrl'>): Promise<string> {
-  const response = await fetch(`${config.apiUrl}/openapi/public`, {
-    signal: AbortSignal.timeout(30_000),
-    redirect: 'error',
-  });
-  if (!response.ok) throw new Error(`Could not load public OpenAPI specification (${response.status})`);
-  const spec: unknown = await response.json();
+export async function loadOpenApi(config: Pick<Config, 'apiUrl'> & { schemaPath?: string }): Promise<string> {
+  const content = await readFile(config.schemaPath ?? new URL('../openapi/openapi.json', import.meta.url), 'utf8');
+  await validateOpenApi(content, config.apiUrl);
+  return content;
+}
+
+export async function validateOpenApi(content: string, apiUrl: string): Promise<void> {
+  const spec: unknown = JSON.parse(content);
   if (!spec || typeof spec !== 'object' || !('openapi' in spec) || !('paths' in spec) || !spec.paths || typeof spec.paths !== 'object') {
     throw new Error('Invalid public OpenAPI specification');
   }
-  const content = JSON.stringify(spec);
-  const tools = new ToolsManager(generatorConfig(content, config.apiUrl));
+  const tools = new ToolsManager(generatorConfig(content, apiUrl));
   await tools.initialize();
   const methods = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace']);
   const operationCount = Object.values(spec.paths).reduce((count, path) =>
@@ -41,7 +42,6 @@ export async function loadOpenApi(config: Pick<Config, 'apiUrl'>): Promise<strin
   if (!operationCount || generated.length !== operationCount || new Set(generated.map((tool) => tool.name)).size !== operationCount) {
     throw new Error('OpenAPI generation did not cover every public API operation');
   }
-  return content;
 }
 
 export async function createCatalog(spec: string, apiUrl: string) {

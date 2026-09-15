@@ -10,6 +10,7 @@
   },
   "files": [
     "dist",
+    "openapi",
     "README.md",
     "SECURITY.md",
     ".env.example"
@@ -24,6 +25,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "check:coverage": "tsx scripts/check-coverage.ts",
+    "update:openapi": "tsx scripts/update-openapi.ts",
     "prepack": "npm run build"
   },
   "keywords": [

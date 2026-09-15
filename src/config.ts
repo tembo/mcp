@@ -15,6 +15,7 @@ const environmentSchema = z.object({
   MCP_OAUTH_ISSUER: httpUrl.refine((value) => new URL(value).protocol === 'https:' && new URL(value).pathname === '/', 'Use the Clerk HTTPS issuer origin'),
   TEMBO_API_URL: httpUrl.default('https://api.tembo.io'),
   MCP_TOOL_MODE: z.enum(['compact', 'all']).default('compact'),
+  MCP_OPENAPI_PATH: z.string().min(1).optional(),
   MCP_ALLOWED_ORIGINS: z.string().default(''),
 });
 
@@ -30,13 +31,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     issuer: parsed.MCP_OAUTH_ISSUER,
     apiUrl: parsed.TEMBO_API_URL.replace(/\/$/, ''),
     toolMode: parsed.MCP_TOOL_MODE,
+    schemaPath: parsed.MCP_OPENAPI_PATH,
     allowedOrigins: [new URL(parsed.MCP_PUBLIC_URL).origin, ...parsed.MCP_ALLOWED_ORIGINS.split(',').map((value) => value.trim()).filter(Boolean).map((value) => new URL(httpUrl.parse(value)).origin)],
   };
 }
 
 export function loadStdioConfig(environment: NodeJS.ProcessEnv = process.env) {
-  const parsed = environmentSchema.pick({ TEMBO_API_URL: true, MCP_TOOL_MODE: true }).extend({ TEMBO_API_KEY: z.string().min(1) }).parse(environment);
-  return { apiUrl: parsed.TEMBO_API_URL.replace(/\/$/, ''), toolMode: parsed.MCP_TOOL_MODE, apiKey: parsed.TEMBO_API_KEY };
+  const parsed = environmentSchema.pick({ TEMBO_API_URL: true, MCP_TOOL_MODE: true, MCP_OPENAPI_PATH: true }).extend({ TEMBO_API_KEY: z.string().min(1) }).parse(environment);
+  return { apiUrl: parsed.TEMBO_API_URL.replace(/\/$/, ''), toolMode: parsed.MCP_TOOL_MODE, apiKey: parsed.TEMBO_API_KEY, schemaPath: parsed.MCP_OPENAPI_PATH };
 }
 
 export type Config = ReturnType<typeof loadConfig>;

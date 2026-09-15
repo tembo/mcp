@@ -4,7 +4,7 @@ The Model Context Protocol interface to the **full Tembo public API**, generated
 
 One package, one generated catalog, two standard transports:
 
-- **Hosted Streamable HTTP:** Clerk OAuth, organization-scoped identity, and full public API access for explicitly approved OAuth clients.
+- **Hosted Streamable HTTP:** native Clerk OAuth, organization-scoped identity, and public API access subject to existing user permissions.
 - **Local stdio:** the same tools through `@tembo-io/mcp`, using your API key. Read-only unless you pass `--allow-writes`.
 
 Both transports use the official MCP TypeScript SDK v2 serving entries and support the `2026-07-28` protocol plus legacy clients using the `2025-11-25` handshake. The old five-tool implementation is replaced, not maintained as a separate server.
@@ -66,20 +66,19 @@ npm run dev
 
 For production, inject the environment and run `npm start` or the container. Configure clients with your deployed `/mcp` URL; the initial 401 response points them to public OAuth protected-resource metadata and requests the organization-selection scope.
 
-Clerk handles login, consent, and refresh. The companion API uses the Clerk SDK to verify opaque access tokens, checks approved client IDs and expiry, resolves the selected organization through Clerk userinfo, and checks current membership. The hosted MCP process never stores a shared API key or Clerk secret.
+Clerk handles client registration, login, consent, and refresh. The companion API uses the Clerk SDK to verify opaque access tokens and expiry, resolves the selected organization through Clerk userinfo, and checks current membership. The hosted MCP process never stores a shared API key or Clerk secret. There are no custom registration, authorization, or token endpoints here.
 
 Deployment requires the companion [API OAuth changes](https://github.com/tembo/monorepo/pull/11327). Configure that API with:
 
 ```dotenv
 MCP_OAUTH_ISSUER=https://your-instance.clerk.accounts.dev
-MCP_OAUTH_CLIENT_IDS=your-approved-clerk-oauth-client-id
 ```
 
-The API reuses its existing `CLERK_SECRET_KEY`. `MCP_OAUTH_CLIENT_IDS` is a comma-separated allowlist of Clerk OAuth applications approved for full public API access. An empty list disables OAuth access. Only approve dedicated clients you control; this is client approval, not JWT resource-audience validation.
+The API reuses its existing `CLERK_SECRET_KEY`. Both services must use the same Clerk instance. There is no MCP client-ID allowlist; Clerk manages client registration and user consent. Leaving the API's issuer unset disables OAuth access.
 
-In Clerk, enable Organizations and consent and register supported public clients with exact redirect URIs and PKCE S256. Request `user:org:read` to select an organization. Clerk's development discovery did not advertise dynamic client registration: do not assume arbitrary MCP clients can register automatically. Use clients that support pre-registered OAuth credentials and validate their login flow before rollout.
+In Clerk, enable Organizations, require PKCE, and configure default OAuth scopes to include `user:org:read` for organization selection. Enable native Dynamic Client Registration for clients that require it, so users can connect using only the MCP URL. Keep consent enabled. DCR exposes a public registration endpoint: monitor registered clients and understand that client names are not proof of trust. Prefer Clerk's CIMD support for compatible clients where available. See Clerk's guide: https://clerk.com/docs/guides/ai/mcp/connect-mcp-client.
 
-**Hosted OAuth grants full public API access within the selected organization**, subject to existing user permissions. This includes writes, credential creation, billing changes, deletion, and agent execution. Make that clear in the OAuth application's name/description and client approval policy. There are no custom `tembo:*` scopes or read-to-write step-up flow. MCP tool approval remains the client's responsibility. No tool automatically retries a failed mutation.
+**Hosted OAuth grants full public API access within the selected organization**, subject to existing user permissions. This includes writes, credential creation, billing changes, deletion, and agent execution. Make that clear during onboarding and consent. There are no custom `tembo:*` scopes or read-to-write step-up flow. MCP tool approval remains the client's responsibility. No tool automatically retries a failed mutation.
 
 ## Configuration
 
@@ -87,6 +86,7 @@ In Clerk, enable Organizations and consent and register supported public clients
 | --- | --- | --- |
 | `TEMBO_API_URL` | Both | `https://api.tembo.io`; local deployments must include the API prefix and `/public-api` |
 | `MCP_TOOL_MODE` | Both | `compact`; use `all` for individual generated tools |
+| `MCP_OPENAPI_PATH` | Both | Optional local JSON file for development/self-hosting; defaults to the bundled snapshot |
 | `TEMBO_API_KEY` | Stdio | Required; forwarded only to the configured API |
 | `MCP_PUBLIC_URL` | HTTP | Required canonical HTTPS URL ending exactly in `/mcp`; HTTP allowed on loopback |
 | `MCP_OAUTH_ISSUER` | HTTP | Required Clerk HTTPS issuer origin |
@@ -94,7 +94,7 @@ In Clerk, enable Organizations and consent and register supported public clients
 | `HOST` | HTTP | `127.0.0.1`; container sets `0.0.0.0` |
 | `PORT` | HTTP | `3000` |
 
-`--transport stdio` is the CLI default. `--transport http` starts the hosted server. `--allow-writes` is only valid for stdio; HTTP access comes from the approved OAuth client and existing API permissions.
+`--transport stdio` is the CLI default. `--transport http` starts the hosted server. `--allow-writes` is only valid for stdio; HTTP access comes from the Clerk OAuth grant and existing API permissions.
 
 ```sh
 docker build -t tembo-mcp .
@@ -103,9 +103,11 @@ docker run --rm --env-file .env -p 3000:3000 tembo-mcp
 
 ## OpenAPI lifecycle
 
-At startup the server fetches `TEMBO_API_URL/openapi/public`. A maintained OpenAPI converter supplies operation metadata and request schemas; name abbreviation is disabled so operation names remain descriptive. The official MCP SDK supplies the protocol implementation. A shared adapter normalizes composed object schemas, validates arguments, and dispatches to the generated API client. No per-endpoint adapter is needed.
+At startup the server reads the versioned `openapi/openapi.json` bundled in npm and Docker releases, without fetching a live schema. A maintained OpenAPI converter supplies operation metadata and request schemas; name abbreviation is disabled so operation names remain descriptive. The official MCP SDK supplies the protocol implementation. A shared adapter normalizes composed object schemas, validates arguments, and dispatches to the generated API client. No per-endpoint adapter is needed.
 
-Startup checks that all public operations generate unique tools. The running process keeps a startup snapshot. Publish an endpoint through the normal public OpenAPI pipeline, then restart/redeploy MCP to discover it. This repository does not configure cross-repository deployment automation.
+Startup checks that all public operations generate unique tools. `npm run update:openapi` fetches the canonical public contract and validates coverage and schemas before updating the snapshot. The update workflow opens or updates a review PR on `production-api-deployed` repository dispatch, manual invocation on main, or a daily fallback. Unchanged schemas produce no diff. Merge the reviewed snapshot, then release/redeploy MCP; restarting an old release does not change its tools. SDK releases are independent.
+
+Automation requires the public CI GitHub App installed on this repository with contents and pull-request write permissions, `CI_PUBLIC_BOT_APP_ID` as a repository variable, and `CI_PUBLIC_BOT_PRIVATE_KEY` as a secret (reuse the SDK/docs bot). The monorepo must separately send the deployment dispatch to this repository; until wired, use the manual or daily trigger. This PR does not add a deployment or npm-publishing workflow.
 
 The coverage check currently validates **125 public operations** against generation and schema compilation. It does not call authenticated customer endpoints or prove that every possible request encoding works. New content types and unusual schemas need serialization regression tests. Internal routes and the existing sandbox-only MCP endpoint are not part of this public contract.
 
@@ -120,7 +122,7 @@ npm pack --dry-run
 npm audit
 ```
 
-Tests cover current and legacy HTTP/stdio clients, generated CRUD, composed schemas, compact discovery, scope challenges, argument validation, and caller isolation. CI uses this single root package. A scheduled contract check catches drift in the deployed public OpenAPI specification without modifying customer data.
+Tests cover current and legacy HTTP/stdio clients, generated CRUD, composed schemas, compact discovery, scope challenges, argument validation, caller isolation, and offline schema loading. CI checks the committed snapshot, not a changing production schema. Only the schema-update workflow fetches the deployed contract; it never calls customer operations.
 
 ## Migration from 0.1.x
 

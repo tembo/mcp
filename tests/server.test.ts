@@ -7,14 +7,13 @@ import { ToolsManager } from '@ivotoby/openapi-mcp-server';
 import type { ExtendedTool } from '@ivotoby/openapi-mcp-server';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
-import { createCatalog, generatorConfig, loadOpenApi } from '../src/openapi.js';
+import { createCatalog, generatorConfig, validateOpenApi } from '../src/openapi.js';
 import { spec } from './spec.js';
 
 const requests: { method: string; path: string; query: string; token: string; body?: unknown }[] = [];
 let backend: ReturnType<typeof serve>;
 let app: Awaited<ReturnType<typeof createApp>>;
 let config: ReturnType<typeof loadConfig>;
-let specResponse: unknown = spec;
 const tools = new ToolsManager(generatorConfig(JSON.stringify(spec), 'https://api.example.com'));
 await tools.initialize();
 
@@ -26,7 +25,6 @@ function toolName(method: string, path: string) {
 
 before(async () => {
   const upstream = new Hono();
-  upstream.get('/public-api/openapi/public', (context) => context.json(specResponse));
   upstream.get('/public-api/oauth/context', (context) => {
     const token = context.req.header('Authorization');
     if (token === 'Bearer revoked') return context.json({}, 401);
@@ -53,9 +51,9 @@ before(async () => {
   const address = backend.address();
   assert.ok(address && typeof address === 'object');
   config = loadConfig({ MCP_PUBLIC_URL: 'http://localhost:3000/mcp', MCP_OAUTH_ISSUER: 'https://clerk.example.com', TEMBO_API_URL: `http://127.0.0.1:${address.port}/public-api`, MCP_TOOL_MODE: 'all' });
-  app = await createApp(config, await loadOpenApi(config));
+  app = await createApp(config, JSON.stringify(spec));
 });
-beforeEach(() => { requests.length = 0; specResponse = spec; });
+beforeEach(() => { requests.length = 0; });
 after(async () => { await new Promise<void>((resolve) => backend.close(() => resolve())); });
 
 async function rpc(method: string, params: Record<string, unknown> = {}, token = 'reader', application = app) {
@@ -109,17 +107,16 @@ describe('OpenAPI-generated MCP', () => {
     assert.deepEqual(create.inputSchema.required, ['content']);
   });
 
-  it('discovers a newly published operation on restart without tool code changes', async () => {
-    specResponse = { ...spec, paths: { ...spec.paths, '/v1/another-new-endpoint': { get: { operationId: 'anotherNewEndpoint', responses: { '200': { description: 'ok' } } } } } };
-    const updated = await createApp(config, await loadOpenApi(config));
+  it('discovers a new operation from an updated snapshot without tool code changes', async () => {
+    const updatedSpec = { ...spec, paths: { ...spec.paths, '/v1/another-new-endpoint': { get: { operationId: 'anotherNewEndpoint', responses: { '200': { description: 'ok' } } } } } };
+    const updated = await createApp(config, JSON.stringify(updatedSpec));
     const response = await rpc('tools/list', {}, 'writer', updated);
     assert.equal((await response.json()).result.tools.length, 11);
   });
 
   it('fails startup on empty or invalid specs instead of silently exposing partial coverage', async () => {
     for (const value of [{}, { openapi: '3.1.0', paths: {} }]) {
-      specResponse = value;
-      await assert.rejects(loadOpenApi(config));
+      await assert.rejects(validateOpenApi(JSON.stringify(value), config.apiUrl));
     }
   });
 
