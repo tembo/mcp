@@ -111,6 +111,8 @@ Automation requires the public CI GitHub App installed on this repository with c
 
 The coverage check currently validates **125 public operations** against generation and schema compilation. It does not call authenticated customer endpoints or prove that every possible request encoding works. New content types and unusual schemas need serialization regression tests. Internal routes and the existing sandbox-only MCP endpoint are not part of this public contract.
 
+The sync script omits ISO timestamp defaults from response definitions: the public schema evaluates some generated date defaults at fetch time, which otherwise creates a diff on every refresh. Request defaults and actual API responses are unchanged.
+
 ## Development and checks
 
 ```sh
