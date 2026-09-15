@@ -14,6 +14,7 @@ const requests: { method: string; path: string; query: string; token: string; bo
 let backend: ReturnType<typeof serve>;
 let app: Awaited<ReturnType<typeof createApp>>;
 let config: ReturnType<typeof loadConfig>;
+let apiKeyRevoked = false;
 const tools = new ToolsManager(generatorConfig(JSON.stringify(spec), 'https://api.example.com'));
 await tools.initialize();
 
@@ -25,8 +26,10 @@ function toolName(method: string, path: string) {
 
 before(async () => {
   const upstream = new Hono();
-  upstream.get('/public-api/oauth/context', (context) => {
+  upstream.get('/public-api/auth/context', (context) => {
     const token = context.req.header('Authorization');
+    if (token === 'Bearer api-key') return apiKeyRevoked ? context.json({}, 401) : context.json({ userId: 'apiKey', organizationId: 'org_a' });
+    if (token === 'Bearer partial-oauth') return context.json({ userId: 'user', organizationId: 'org_a', scopes: ['user:org:read'] });
     if (token === 'Bearer revoked') return context.json({}, 401);
     if (token === 'Bearer removed') return context.json({}, 403);
     if (token === 'Bearer missing-scopes') return context.json({ code: 'insufficient_scope', requiredScopes: ['user:org:read'] }, 403);
@@ -53,7 +56,7 @@ before(async () => {
   config = loadConfig({ MCP_PUBLIC_URL: 'http://localhost:3000/mcp', MCP_OAUTH_ISSUER: 'https://clerk.example.com', TEMBO_API_URL: `http://127.0.0.1:${address.port}/public-api`, MCP_TOOL_MODE: 'all' });
   app = await createApp(config, JSON.stringify(spec));
 });
-beforeEach(() => { requests.length = 0; });
+beforeEach(() => { requests.length = 0; apiKeyRevoked = false; });
 after(async () => { await new Promise<void>((resolve) => backend.close(() => resolve())); });
 
 async function rpc(method: string, params: Record<string, unknown> = {}, token = 'reader', application = app) {
@@ -65,6 +68,30 @@ async function rpc(method: string, params: Record<string, unknown> = {}, token =
 }
 
 describe('OpenAPI-generated MCP', () => {
+  it('rechecks key revocation after successful discovery', async () => {
+    assert.equal((await rpc('tools/list', {}, 'api-key')).status, 200);
+    apiKeyRevoked = true;
+    assert.equal((await rpc('tools/call', { name: toolName('GET', '/v1/billing'), arguments: {} }, 'api-key')).status, 401);
+    assert.equal(requests.length, 0);
+  });
+
+  it('does not reinterpret incomplete OAuth identities as API keys', async () => {
+    assert.equal((await rpc('tools/list', {}, 'partial-oauth')).status, 503);
+    assert.equal(requests.length, 0);
+  });
+
+  it('accepts API keys without OAuth scopes or expiry and forwards them for reads and writes', async () => {
+    assert.equal((await rpc('tools/list', {}, 'api-key')).status, 200);
+    for (const method of ['GET', 'POST']) {
+      const response = await (await rpc('tools/call', {
+        name: toolName(method, '/v1/widgets'),
+        arguments: method === 'POST' ? { content: 'hello' } : {},
+      }, 'api-key')).json();
+      assert.equal(response.result.isError, undefined);
+    }
+    assert.deepEqual(requests.map((request) => request.token), ['Bearer api-key', 'Bearer api-key']);
+  });
+
   it('exposes every operation, including billing, credentials, legacy, and future endpoints', async () => {
     const response = await rpc('tools/list', {}, 'writer');
     const payload = await response.json();
@@ -183,7 +210,7 @@ describe('OAuth transport', () => {
     assert.match(response.headers.get('www-authenticate') ?? '', /scope="user:org:read"/);
   });
   it('rejects query credentials even when a valid header is present', async () => {
-    for (const query of ['access_token=secret', 'token=secret', 'state=secret']) {
+    for (const query of ['access_token=secret', 'token=secret', 'state=secret', 'apiKey=secret']) {
       const response = await app.request(`/mcp?${query}`, { method: 'POST', headers: { Authorization: 'Bearer writer' } });
       assert.equal(response.status, 400);
       assert.equal(response.headers.get('cache-control'), 'no-store');

@@ -10,12 +10,12 @@ import { createServer } from './server.js';
 async function main() {
   const { values } = parseArgs({ options: { transport: { type: 'string', default: 'stdio' }, 'allow-writes': { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h' } } });
   if (values.help) {
-    console.log('Usage: tembo-mcp [--transport stdio|http] [--allow-writes]\n\nstdio: TEMBO_API_KEY required; read-only unless --allow-writes.\nhttp: MCP_PUBLIC_URL and MCP_OAUTH_ISSUER required; Clerk OAuth grants access subject to API permissions.\nMCP_TOOL_MODE=compact (default) or all. TEMBO_API_URL defaults to https://api.tembo.io.\nUses the bundled OpenAPI snapshot; MCP_OPENAPI_PATH overrides it with a local file.');
+    console.log('Usage: tembo-mcp [--transport stdio|http] [--allow-writes]\n\nstdio: TEMBO_API_KEY required; read-only unless --allow-writes.\nhttp: MCP_PUBLIC_URL and MCP_OAUTH_ISSUER required; Clerk OAuth or bearer API keys grant access subject to API permissions.\nMCP_TOOL_MODE=compact (default) or all. TEMBO_API_URL defaults to https://api.tembo.io.\nUses the bundled OpenAPI snapshot; MCP_OPENAPI_PATH overrides it with a local file.');
     return;
   }
   if (!['http', 'stdio'].includes(values.transport)) throw new Error('Invalid transport');
   if (values.transport === 'http') {
-    if (values['allow-writes']) throw new Error('HTTP writes require OAuth consent, not --allow-writes');
+    if (values['allow-writes']) throw new Error('HTTP writes use the caller\'s API permissions, not --allow-writes');
     const config = loadConfig();
     const app = await createApp(config, await loadOpenApi(config));
     const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host });

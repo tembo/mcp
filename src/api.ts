@@ -7,13 +7,18 @@ const scopeErrorSchema = z.object({
   requiredScopes: z.array(z.literal('user:org:read')).min(1).max(1),
 });
 
-export const identitySchema = z.object({
+const apiKeyIdentitySchema = z.object({
+  userId: z.string().min(1),
+  organizationId: z.string().min(1),
+}).strict();
+
+export const identitySchema = z.union([z.object({
   userId: z.string().min(1),
   organizationId: z.string().min(1),
   clientId: z.string().min(1),
   scopes: z.array(z.string()),
   expiresAt: z.number().int().positive(),
-});
+}), apiKeyIdentitySchema]);
 
 export type Identity = z.infer<typeof identitySchema>;
 
@@ -26,7 +31,7 @@ export class AuthenticationError extends Error {
 export async function verifyIdentity(apiUrl: string, token: string): Promise<Identity> {
   let response: Response;
   try {
-    response = await fetch(`${apiUrl}/oauth/context`, {
+    response = await fetch(`${apiUrl}/auth/context`, {
       headers: { Authorization: `Bearer ${token}` },
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
@@ -43,8 +48,8 @@ export async function verifyIdentity(apiUrl: string, token: string): Promise<Ide
   }
   const result = identitySchema.safeParse(await response.json().catch(() => null));
   if (!result.success) throw new AuthenticationError(503);
-  if (result.data.expiresAt <= Date.now() / 1000) throw new AuthenticationError(401);
-  if (!result.data.scopes.includes('user:org:read')) {
+  if ('expiresAt' in result.data && result.data.expiresAt <= Date.now() / 1000) throw new AuthenticationError(401);
+  if ('scopes' in result.data && !result.data.scopes.includes('user:org:read')) {
     throw new AuthenticationError(403, BASE_SCOPES);
   }
   return result.data;

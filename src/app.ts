@@ -56,7 +56,7 @@ export async function createApp(config: Config, openapi: string) {
       context.header('Allow', 'POST, GET, DELETE, OPTIONS');
       return context.json({ error: 'Method not allowed' }, 405);
     }
-    if (['access_token', 'token', 'state'].some((name) => context.req.query(name) !== undefined)) {
+    if (['access_token', 'token', 'state', 'apiKey'].some((name) => context.req.query(name) !== undefined)) {
       context.header('WWW-Authenticate', challenge('invalid_request'));
       return context.json({ error: 'OAuth credentials must use a Bearer header' }, 400);
     }
@@ -81,9 +81,9 @@ export async function createApp(config: Config, openapi: string) {
     return handler.fetch(context.req.raw, {
         authInfo: {
           token,
-          clientId: identity.clientId,
-          scopes: identity.scopes,
-          expiresAt: identity.expiresAt,
+          clientId: 'clientId' in identity ? identity.clientId : 'tembo-api-key',
+          scopes: 'scopes' in identity ? identity.scopes : [],
+          ...('expiresAt' in identity ? { expiresAt: identity.expiresAt } : {}),
           resource: publicUrl,
           extra: { userId: identity.userId, organizationId: identity.organizationId },
         },

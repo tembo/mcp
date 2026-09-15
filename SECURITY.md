@@ -2,7 +2,9 @@
 
 Report vulnerabilities privately to the Tembo maintainers through the product's support channel. Do not put tokens, customer data, or private code in public issues.
 
-## Hosted OAuth server boundaries
+## Hosted server boundaries
+
+- Hosted connections also accept Tembo API keys as bearer credentials. The API's existing key middleware checks revocation and derives organization identity from the stored key record. Keys do not acquire OAuth scopes or expiry. No shared agent secret is accepted and the MCP stores no server-wide API key. Both preflight and generated API calls verify the caller's credential; no authentication result is cached.
 
 - The **public** OpenAPI document determines tool coverage. Do not point this service at an internal or Prisma spec. The operator-configured API root is trusted and receives user tokens.
 - Clerk issues the OAuth grant and manages client registration and consent. The API uses the Clerk SDK to verify the opaque access token and expiry, resolves the selected organization through trusted Clerk userinfo, and checks current membership; existing API resource permissions remain authoritative. There is no separate MCP client-ID allowlist.
