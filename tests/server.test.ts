@@ -10,7 +10,7 @@ import { loadConfig } from '../src/config.js';
 import { createCatalog, generatorConfig, validateOpenApi } from '../src/openapi.js';
 import { spec } from './spec.js';
 
-const requests: { method: string; path: string; query: string; token: string; body?: unknown }[] = [];
+const requests: { method: string; path: string; query: string; token: string; agentOrganizationId?: string; body?: unknown }[] = [];
 let backend: ReturnType<typeof serve>;
 let app: Awaited<ReturnType<typeof createApp>>;
 let config: ReturnType<typeof loadConfig>;
@@ -28,6 +28,11 @@ before(async () => {
   const upstream = new Hono();
   upstream.get('/public-api/auth/context', (context) => {
     const token = context.req.header('Authorization');
+    if (token === 'Bearer agent-secret') {
+      const organizationId = context.req.header('X-Agent-Org-Id');
+      if (!organizationId || !['org_a', 'org_b'].includes(organizationId)) return context.json({}, 403);
+      return context.json({ principal: 'agent', organizationId });
+    }
     if (token === 'Bearer api-key') return apiKeyRevoked ? context.json({}, 401) : context.json({ userId: 'apiKey', organizationId: 'org_a' });
     if (token === 'Bearer partial-oauth') return context.json({ userId: 'user', organizationId: 'org_a', scopes: ['user:org:read'] });
     if (token === 'Bearer revoked') return context.json({}, 401);
@@ -46,7 +51,7 @@ before(async () => {
   });
   upstream.all('/public-api/*', async (context) => {
     const token = context.req.header('Authorization') ?? '';
-    requests.push({ method: context.req.method, path: context.req.path, query: new URL(context.req.url).search, token, body: ['POST', 'PUT', 'PATCH'].includes(context.req.method) ? await context.req.json() : undefined });
+    requests.push({ method: context.req.method, path: context.req.path, query: new URL(context.req.url).search, token, agentOrganizationId: context.req.header('X-Agent-Org-Id'), body: ['POST', 'PUT', 'PATCH'].includes(context.req.method) ? await context.req.json() : undefined });
     if (context.req.path.endsWith('/forbidden')) return context.json({ token: 'secret-do-not-return', error: 'private internals' }, 403);
     return context.json({ ok: true });
   });
@@ -59,15 +64,51 @@ before(async () => {
 beforeEach(() => { requests.length = 0; apiKeyRevoked = false; });
 after(async () => { await new Promise<void>((resolve) => backend.close(() => resolve())); });
 
-async function rpc(method: string, params: Record<string, unknown> = {}, token = 'reader', application = app) {
+async function rpc(method: string, params: Record<string, unknown> = {}, token = 'reader', application = app, headers: Record<string, string> = {}) {
   return application.request('/mcp', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(typeof params.name === 'string' ? { 'Mcp-Name': params.name } : {}) },
+    headers: { ...headers, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(typeof params.name === 'string' ? { 'Mcp-Name': params.name } : {}) },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} } } }),
   });
 }
 
 describe('OpenAPI-generated MCP', () => {
+  it('forwards the verified agent organization with generated reads and writes', async () => {
+    for (const method of ['GET', 'POST']) {
+      const response = await rpc('tools/call', { name: toolName(method, '/v1/widgets'), arguments: method === 'POST' ? { content: 'fixture' } : {} }, 'agent-secret', app, { 'X-Agent-Org-Id': 'org_a' });
+      assert.equal((await response.json()).result.isError, undefined);
+    }
+    assert.deepEqual(requests.map((request) => [request.token, request.agentOrganizationId]), [['Bearer agent-secret', 'org_a'], ['Bearer agent-secret', 'org_a']]);
+  });
+
+  it('rejects missing or unknown agent organizations before dispatch', async () => {
+    for (const headers of [{}, { 'X-Agent-Org-Id': 'unknown' }] as Record<string, string>[]) {
+      assert.equal((await rpc('tools/list', {}, 'agent-secret', app, headers)).status, 403);
+    }
+    assert.equal(requests.length, 0);
+  });
+
+  it('isolates concurrent agent organizations', async () => {
+    await Promise.all(['org_a', 'org_b'].map((organizationId) => rpc('tools/call', { name: toolName('GET', '/v1/widgets'), arguments: {} }, 'agent-secret', app, { 'X-Agent-Org-Id': organizationId })));
+    assert.deepEqual(requests.map((request) => request.agentOrganizationId).sort(), ['org_a', 'org_b']);
+  });
+
+  it('does not forward agent organization headers for OAuth or API-key identities', async () => {
+    for (const token of ['reader', 'api-key']) {
+      await rpc('tools/call', { name: toolName('GET', '/v1/widgets'), arguments: {} }, token, app, { 'X-Agent-Org-Id': 'org_b', 'X-Agent-Auth': 'agent-secret' });
+    }
+    assert.deepEqual(requests.map((request) => request.agentOrganizationId), [undefined, undefined]);
+  });
+
+  it('prevents generated header arguments from overriding the verified organization', async () => {
+    const headerSpec = structuredClone(spec);
+    headerSpec.paths['/v1/widgets'].get.parameters.push({ name: 'X-Agent-Org-Id', in: 'header', schema: { type: 'string' } });
+    const headerApp = await createApp(config, JSON.stringify(headerSpec));
+    const response = await rpc('tools/call', { name: toolName('GET', '/v1/widgets'), arguments: { 'X-Agent-Org-Id': 'org_b' } }, 'agent-secret', headerApp, { 'X-Agent-Org-Id': 'org_a' });
+    assert.equal((await response.json()).result.isError, true);
+    assert.equal(requests.length, 0);
+  });
+
   it('rechecks key revocation after successful discovery', async () => {
     assert.equal((await rpc('tools/list', {}, 'api-key')).status, 200);
     apiKeyRevoked = true;

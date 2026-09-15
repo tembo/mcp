@@ -4,7 +4,7 @@ The Model Context Protocol interface to the **full Tembo public API**, generated
 
 One package, one generated catalog, two standard transports:
 
-- **Hosted Streamable HTTP:** native Clerk OAuth or a Tembo API key in `Authorization: Bearer <key>`, with organization-scoped public API permissions.
+- **Hosted Streamable HTTP:** native Clerk OAuth or a Tembo API key in `Authorization: Bearer <key>`, with organization-scoped public API permissions. Trusted services can also use the existing agent bearer secret with an explicit organization (see below).
 - **Local stdio:** the same tools through `@tembo-io/mcp`, using your API key. Read-only unless you pass `--allow-writes`.
 
 Both transports use the official MCP TypeScript SDK v2 serving entries and support the `2026-07-28` protocol plus legacy clients using the `2025-11-25` handshake. The old five-tool implementation is replaced, not maintained as a separate server.
@@ -96,7 +96,9 @@ In Clerk, enable Organizations, require PKCE, and configure default OAuth scopes
 
 `--transport stdio` is the CLI default. `--transport http` starts the hosted server. `--allow-writes` is only valid for stdio; HTTP access comes from the caller's Clerk OAuth grant or API key and existing API permissions.
 
-For Tembo's gateway/code mode, add an HTTP connection using existing static-header credentials: `Authorization: Bearer <organization-api-key>`. No interactive login is needed. Store the key in the connection's secret storage, not in source or tool arguments. The API verifies the key on every request, including revocation, and derives the organization from its key record. Shared agent secrets and session tokens are not supported by this public MCP. Existing internal MCP tools remain separate.
+For Tembo's gateway/code mode, add an HTTP connection using existing static-header credentials: `Authorization: Bearer <organization-api-key>`. No interactive login is needed. Store the key in the connection's secret storage, not in source or tool arguments. The API verifies the key on every request, including revocation, and derives the organization from its key record. Existing internal MCP tools remain separate.
+
+Trusted Tembo services may instead send `Authorization: Bearer <existing-agent-secret>` together with `X-Agent-Org-Id: <organization-id>`. The API reuses `authAgent`, requires a known organization, and retains its organization-scoped database client. The MCP forwards the verified organization only for agent identities. This is **privileged service authentication**: the shared secret holder can select any known organization. Keep it in trusted backend secret storage, never customer MCP configs, model-visible tool arguments, or untrusted agent sandboxes. Organization-scoped API keys remain the safer choice there. Session tokens are not supported. This adds support only; it does not migrate existing agent connections.
 
 ```sh
 docker build -t tembo-mcp .

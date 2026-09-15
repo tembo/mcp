@@ -14,7 +14,8 @@ export async function createApp(config: Config, openapi: string) {
   const catalog = await createCatalog(openapi, config.apiUrl);
   const handler = createMcpHandler(({ authInfo }) => {
     if (!authInfo) throw new Error('Missing verified identity');
-    return createServer(catalog, { apiUrl: config.apiUrl, token: authInfo.token, mode: config.toolMode, allowWrites: true });
+    return createServer(catalog, { apiUrl: config.apiUrl, token: authInfo.token, mode: config.toolMode, allowWrites: true,
+      agentOrganizationId: typeof authInfo.extra?.agentOrganizationId === 'string' ? authInfo.extra.agentOrganizationId : undefined });
   });
   const challenge = (error?: string, scopes?: string[]) => [
     `Bearer resource_metadata="${metadataUrl}"`,
@@ -68,7 +69,7 @@ export async function createApp(config: Config, openapi: string) {
 
     let identity;
     try {
-      identity = await verifyIdentity(config.apiUrl, token);
+      identity = await verifyIdentity(config.apiUrl, token, context.req.header('X-Agent-Org-Id'));
     } catch (error) {
       const status = error instanceof AuthenticationError ? error.status : 503;
       if (status === 401) context.header('WWW-Authenticate', challenge('invalid_token', BASE_SCOPES));
@@ -81,11 +82,12 @@ export async function createApp(config: Config, openapi: string) {
     return handler.fetch(context.req.raw, {
         authInfo: {
           token,
-          clientId: 'clientId' in identity ? identity.clientId : 'tembo-api-key',
+          clientId: 'clientId' in identity ? identity.clientId : 'principal' in identity ? 'tembo-agent' : 'tembo-api-key',
           scopes: 'scopes' in identity ? identity.scopes : [],
           ...('expiresAt' in identity ? { expiresAt: identity.expiresAt } : {}),
           resource: publicUrl,
-          extra: { userId: identity.userId, organizationId: identity.organizationId },
+          extra: { ...('userId' in identity ? { userId: identity.userId } : {}), organizationId: identity.organizationId,
+            ...('principal' in identity ? { agentOrganizationId: identity.organizationId } : {}) },
         },
     });
   });

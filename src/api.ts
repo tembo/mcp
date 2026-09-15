@@ -18,7 +18,7 @@ export const identitySchema = z.union([z.object({
   clientId: z.string().min(1),
   scopes: z.array(z.string()),
   expiresAt: z.number().int().positive(),
-}), apiKeyIdentitySchema]);
+}), apiKeyIdentitySchema, z.object({ principal: z.literal('agent'), organizationId: z.string().min(1) }).strict()]);
 
 export type Identity = z.infer<typeof identitySchema>;
 
@@ -28,11 +28,11 @@ export class AuthenticationError extends Error {
   }
 }
 
-export async function verifyIdentity(apiUrl: string, token: string): Promise<Identity> {
+export async function verifyIdentity(apiUrl: string, token: string, agentOrganizationId?: string): Promise<Identity> {
   let response: Response;
   try {
     response = await fetch(`${apiUrl}/auth/context`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, ...(agentOrganizationId ? { 'X-Agent-Org-Id': agentOrganizationId } : {}) },
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
     });
