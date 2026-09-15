@@ -132,9 +132,9 @@ The `Publish MCP image` workflow runs manually on `main` or when a GitHub releas
 
 Before publishing, configure the `release` GitHub environment in this repo:
 
-- Set `ECR_REPO_PREFIX` to the shared registry host and `ECR_ROLE_ARN` to the publishing role, as repository or environment variables.
+- Set `ECR_REPO_PREFIX` to the shared registry host and `ECR_ROLE_ARN` to the existing `iam-role/ecr-access` role ARN, as repository or environment variables.
 - Have infra create `tembo-mcp` in the shared registry in `us-east-1`, with immutable SHA tags and mutable `*.mcp` environment tags, matching the existing ECR pattern.
-- Scope the publishing role's GitHub OIDC trust to `repo:tembo/mcp:environment:release`. Give it ECR push/pull and image lookup permissions for `tembo-mcp`, not ECS deployment permissions. No long-lived AWS credentials are needed.
+- Add `repo:tembo/mcp:environment:release` to the existing ECR role's GitHub OIDC trust. This reuses its shared registry permissions, including `tembo-mcp`, without ECS deployment permissions. No new role or long-lived AWS credentials are needed.
 - Protect the `release` environment with approved branch/tag rules and required reviewers. The separate check job runs without AWS credentials.
 
 The monorepo's manual `Deploy MCP` workflow accepts `environment` (`dev`, `staging`, or `prod`) and the image SHA. It reuses `deploy-ecs.yaml`, including its rollout/stability checks and environment tagging. It uses the existing monorepo environment roles/registry variables and maps dev to the `test` GitHub environment, staging to `staging`, and prod to `production`. Production approval is controlled by that existing GitHub environment; verify its required-reviewer policy before launch. Deployments run only from monorepo main and serialize per environment. The same image can be promoted without rebuilding; rollback selects a previous published SHA.
