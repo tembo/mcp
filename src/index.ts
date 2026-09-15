@@ -1,283 +1,40 @@
 #!/usr/bin/env node
-
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { z } from 'zod';
-import { createTemboClient } from './client.js';
-
-const TEMBO_API_KEY = process.env.TEMBO_API_KEY;
-const TEMBO_API_URL = process.env.TEMBO_API_URL || 'https://api.tembo.io';
-
-if (!TEMBO_API_KEY) {
-    console.error('Error: TEMBO_API_KEY environment variable is required');
-    process.exit(1);
-}
-
-const temboClient = createTemboClient({
-    apiKey: TEMBO_API_KEY,
-    baseUrl: TEMBO_API_URL,
-});
-
-const server = new McpServer(
-    {
-        name: 'tembo-mcp',
-        version: '0.1.0',
-    },
-    {
-        capabilities: {
-            tools: {},
-        },
-    }
-);
-
-server.registerTool(
-    'create_task',
-    {
-        description:
-            'Create a new task in Tembo. Tasks are work items that Tembo will process in the background.',
-        inputSchema: {
-            prompt: z.string().optional().describe('Brief description of the task to be performed'),
-            description: z
-                .string()
-                .optional()
-                .describe('Detailed description of the task (alternative to prompt)'),
-            repositories: z
-                .array(z.string())
-                .optional()
-                .describe('Array of code repository URLs that this task relates to'),
-            branch: z.string().optional().describe('Specific git branch to target for this task'),
-            agent: z
-                .string()
-                .optional()
-                .describe('The agent to use for this task (e.g., "claudeCode:claude-4-5-sonnet")'),
-            queueRightAway: z
-                .boolean()
-                .optional()
-                .default(true)
-                .describe('Whether to immediately queue the task for processing'),
-        },
-    },
-    async (args) => {
-        try {
-            // Use prompt or description - SDK only accepts prompt
-            const prompt = args.prompt || args.description;
-            if (!prompt) {
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: 'Error: Either prompt or description is required',
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-
-            const result = await temboClient.task.create({
-                prompt,
-                repositories: args.repositories,
-                branch: args.branch,
-                agent: args.agent,
-                queueRightAway: args.queueRightAway,
-            });
-
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: JSON.stringify(result, null, 2),
-                    },
-                ],
-            };
-        } catch (error) {
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    }
-);
-
-server.registerTool(
-    'list_tasks',
-    {
-        description: 'Get a paginated list of tasks for the organization',
-        inputSchema: {
-            limit: z
-                .number()
-                .int()
-                .min(1)
-                .max(100)
-                .optional()
-                .default(10)
-                .describe('Number of items to return per page (1-100, default 10)'),
-            page: z
-                .number()
-                .int()
-                .min(1)
-                .optional()
-                .default(1)
-                .describe('Page number to retrieve (starts from 1, default 1)'),
-        },
-    },
-    async (args) => {
-        try {
-            const result = await temboClient.task.list({
-                limit: args.limit,
-                page: args.page,
-            });
-
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: JSON.stringify(result, null, 2),
-                    },
-                ],
-            };
-        } catch (error) {
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    }
-);
-
-server.registerTool(
-    'search_tasks',
-    {
-        description: 'Search tasks by query string in title or description',
-        inputSchema: {
-            q: z.string().describe('Search query to find tasks'),
-            limit: z
-                .number()
-                .int()
-                .min(1)
-                .max(100)
-                .optional()
-                .default(10)
-                .describe('Number of items to return per page (1-100, default 10)'),
-            page: z
-                .number()
-                .int()
-                .min(1)
-                .optional()
-                .default(1)
-                .describe('Page number to retrieve (starts from 1, default 1)'),
-        },
-    },
-    async (args) => {
-        try {
-            const result = await temboClient.task.search({
-                q: args.q,
-                limit: args.limit,
-                page: args.page,
-            });
-
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: JSON.stringify(result, null, 2),
-                    },
-                ],
-            };
-        } catch (error) {
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    }
-);
-
-server.registerTool(
-    'list_repositories',
-    {
-        description: 'Get a list of enabled code repositories for the organization',
-        inputSchema: {},
-    },
-    async () => {
-        try {
-            const result = await temboClient.repository.list();
-
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: JSON.stringify(result, null, 2),
-                    },
-                ],
-            };
-        } catch (error) {
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    }
-);
-
-server.registerTool(
-    'get_current_user',
-    {
-        description: 'Get information about the current authenticated user',
-        inputSchema: {},
-    },
-    async () => {
-        try {
-            const result = await temboClient.me.retrieve();
-
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: JSON.stringify(result, null, 2),
-                    },
-                ],
-            };
-        } catch (error) {
-            return {
-                content: [
-                    {
-                        type: 'text' as const,
-                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-                    },
-                ],
-                isError: true,
-            };
-        }
-    }
-);
+import { parseArgs } from 'node:util';
+import { serve } from '@hono/node-server';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
+import { createApp } from './app.js';
+import { loadConfig, loadStdioConfig } from './config.js';
+import { createCatalog, loadOpenApi } from './openapi.js';
+import { createServer } from './server.js';
 
 async function main() {
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error('Tembo MCP server running on stdio');
+  const { values } = parseArgs({ options: { transport: { type: 'string', default: 'stdio' }, 'allow-writes': { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h' } } });
+  if (values.help) {
+    console.log('Usage: tembo-mcp [--transport stdio|http] [--allow-writes]\n\nstdio: TEMBO_API_KEY required; read-only unless --allow-writes.\nhttp: MCP_PUBLIC_URL and MCP_OAUTH_ISSUER required; Clerk OAuth or bearer API keys grant access subject to API permissions.\nMCP_TOOL_MODE=compact (default) or all. TEMBO_API_URL defaults to https://api.tembo.io.\nUses the bundled OpenAPI snapshot; MCP_OPENAPI_PATH overrides it with a local file.');
+    return;
+  }
+  if (!['http', 'stdio'].includes(values.transport)) throw new Error('Invalid transport');
+  if (values.transport === 'http') {
+    if (values['allow-writes']) throw new Error('HTTP writes use the caller\'s API permissions, not --allow-writes');
+    const config = loadConfig();
+    const app = await createApp(config, await loadOpenApi(config));
+    const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host });
+    console.error(`Tembo MCP listening on ${config.host}:${config.port}`);
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+      process.once(signal, () => {
+        server.close(() => process.exit(0));
+        setTimeout(() => process.exit(1), 10_000).unref();
+      });
+    }
+  } else {
+    const config = loadStdioConfig();
+    const catalog = await createCatalog(await loadOpenApi(config), config.apiUrl);
+    const server = serveStdio(() => createServer(catalog, { apiUrl: config.apiUrl, token: config.apiKey, mode: config.toolMode, allowWrites: values['allow-writes'] }), { onerror: () => console.error('MCP transport error') });
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { void server.close().finally(() => process.exit(0)); });
+  }
 }
 
-main().catch((error) => {
-    console.error('Fatal error in main():', error);
-    process.exit(1);
+main().catch(() => {
+  console.error('MCP startup failed. Check configuration and the OpenAPI snapshot; run --help for usage.');
+  process.exitCode = 1;
 });
