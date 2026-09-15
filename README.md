@@ -154,13 +154,6 @@ Use each environment's own API URL and Clerk issuer. The MCP container needs no 
 
 Schema review and deployment are intentionally separate: API deploy → schema PR → review/merge → publish image → deploy that SHA. No schema-update event can automatically deploy production.
 
-## Migration from 0.1.x
-
-- The five handwritten tools (`create_task`, `list_tasks`, `search_tasks`, `list_repositories`, `get_current_user`) are replaced by generated discovery and execution. Update stored prompts or tool-name allowlists; old tool aliases are not retained.
-- Existing local configurations can keep the package name and API-key variable, but local mutations now need `--allow-writes`.
-- Hosted connections use Clerk OAuth instead of putting a shared API key in the server.
-- There is no `remote/` package or separate dependency tree. Source, Docker, npm packaging, and CI all use the implementation at the repository root.
-
 ## Rollout boundary
 
 The code is the main implementation, not a parallel preview. Merging it does not deploy a host, publish npm, or configure Clerk. Before enabling production, test real client login, org selection, consent denial, refresh, cross-org access, membership removal, and revocation. The API checks Clerk's current grant and organization membership on each request.
