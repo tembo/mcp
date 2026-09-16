@@ -216,6 +216,79 @@ describe('OpenAPI-generated MCP', () => {
   });
 });
 
+describe('Self-hosted HTTP without Clerk', () => {
+  async function bearerApp(issuer?: string, mode: 'all' | 'compact' = 'all') {
+    return createApp(loadConfig({ MCP_PUBLIC_URL: config.publicUrl, TEMBO_API_URL: config.apiUrl, MCP_TOOL_MODE: mode, ...(issuer === undefined ? {} : { MCP_OAUTH_ISSUER: issuer }) }), JSON.stringify(spec));
+  }
+
+  it('accepts missing or empty issuers without publishing OAuth metadata', async () => {
+    for (const issuer of [undefined, '']) {
+      const application = await bearerApp(issuer);
+      assert.equal((await application.request('/health')).status, 200);
+      for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {
+        assert.equal((await application.request(path)).status, 404);
+      }
+      const response = await application.request('/mcp', { method: 'POST' });
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get('www-authenticate'), 'Bearer realm="tembo"');
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.doesNotMatch(await response.text(), /Clerk|Connect with your Tembo account/);
+    }
+  });
+
+  it('connects a real SDK client using an API key without any OAuth provider', async () => {
+    const application = await bearerApp();
+    const client = new Client({ name: 'self-hosted-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(config.publicUrl), {
+      requestInit: { headers: { Authorization: 'Bearer api-key' } },
+      fetch: async (input, init) => application.request(new Request(input, init)),
+    });
+    try {
+      await client.connect(transport);
+      assert.equal((await client.listTools()).tools.length, 10);
+      const result = await client.callTool({ name: toolName('GET', '/v1/widgets'), arguments: {} });
+      assert.equal(result.isError, undefined);
+    } finally { await client.close(); }
+  });
+
+  for (const mode of ['all', 'compact'] as const) {
+    it(`executes generated reads and writes with API keys and agent secrets in ${mode} mode`, async () => {
+      const application = await bearerApp('', mode);
+      for (const token of ['api-key', 'agent-secret']) {
+        assert.equal((await rpc('tools/list', {}, token, application, { 'X-Agent-Org-Id': 'org_a' })).status, 200);
+        for (const method of ['GET', 'POST']) {
+          const name = toolName(method, '/v1/widgets');
+          const args = method === 'GET' ? {} : { content: 'self-hosted fixture' };
+          const params = mode === 'all' ? { name, arguments: args } : { name: method === 'GET' ? 'call_read_tool' : 'call_write_tool', arguments: { name, arguments: args } };
+          const result = await (await rpc('tools/call', params, token, application, { 'X-Agent-Org-Id': 'org_a' })).json();
+          assert.equal(result.result.isError, undefined);
+        }
+      }
+      assert.deepEqual(requests.map((request) => [request.token, request.agentOrganizationId]), [
+        ['Bearer api-key', undefined], ['Bearer api-key', undefined], ['Bearer agent-secret', 'org_a'], ['Bearer agent-secret', 'org_a'],
+      ]);
+    });
+  }
+
+  it('fails closed on revoked keys, missing agent orgs, provider failure and OAuth identities', async () => {
+    const application = await bearerApp();
+    assert.equal((await rpc('tools/list', {}, 'api-key', application)).status, 200);
+    apiKeyRevoked = true;
+    for (const [token, status] of [['api-key', 401], ['agent-secret', 403], ['unavailable', 503], ['malformed', 503], ['reader', 401]] as const) {
+      const response = await rpc('tools/list', {}, token, application);
+      assert.equal(response.status, status);
+      assert.doesNotMatch(response.headers.get('www-authenticate') ?? '', /resource_metadata|scope=/);
+    }
+    assert.equal(requests.length, 0);
+  });
+
+  it('still validates nonempty issuer configuration', () => {
+    for (const issuer of ['not-a-url', 'http://localhost:3000', 'https://clerk.example.com/path', ' ']) {
+      assert.throws(() => loadConfig({ MCP_PUBLIC_URL: config.publicUrl, MCP_OAUTH_ISSUER: issuer }));
+    }
+  });
+});
+
 describe('OAuth transport', () => {
   it('publishes canonical metadata without authentication', async () => {
     const response = await app.request('/.well-known/oauth-protected-resource/mcp', { headers: { Host: 'attacker.example.com' } });

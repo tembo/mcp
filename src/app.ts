@@ -18,9 +18,9 @@ export async function createApp(config: Config, openapi: string) {
       agentOrganizationId: typeof authInfo.extra?.agentOrganizationId === 'string' ? authInfo.extra.agentOrganizationId : undefined });
   });
   const challenge = (error?: string, scopes?: string[]) => [
-    `Bearer resource_metadata="${metadataUrl}"`,
+    config.issuer ? `Bearer resource_metadata="${metadataUrl}"` : 'Bearer realm="tembo"',
     ...(error ? [`error="${error}"`] : []),
-    ...(scopes ? [`scope="${scopes.join(' ')}"`] : []),
+    ...(config.issuer && scopes ? [`scope="${scopes.join(' ')}"`] : []),
   ].join(', ');
 
   app.use('*', cors({
@@ -31,15 +31,17 @@ export async function createApp(config: Config, openapi: string) {
   }));
   app.get('/health', (context) => context.json({ status: 'ok' }));
 
-  const metadata = {
-    resource: config.publicUrl,
-    authorization_servers: [config.issuer],
-    scopes_supported: BASE_SCOPES,
-    bearer_methods_supported: ['header'],
-    resource_name: 'Tembo',
-  };
-  app.get('/.well-known/oauth-protected-resource/mcp', (context) => context.json(metadata));
-  app.get('/.well-known/oauth-protected-resource', (context) => context.json(metadata));
+  if (config.issuer) {
+    const metadata = {
+      resource: config.publicUrl,
+      authorization_servers: [config.issuer],
+      scopes_supported: BASE_SCOPES,
+      bearer_methods_supported: ['header'],
+      resource_name: 'Tembo',
+    };
+    app.get('/.well-known/oauth-protected-resource/mcp', (context) => context.json(metadata));
+    app.get('/.well-known/oauth-protected-resource', (context) => context.json(metadata));
+  }
 
   app.use('/mcp', async (context, next) => {
     context.header('Cache-Control', 'no-store');
@@ -59,17 +61,18 @@ export async function createApp(config: Config, openapi: string) {
     }
     if (['access_token', 'token', 'state', 'apiKey'].some((name) => context.req.query(name) !== undefined)) {
       context.header('WWW-Authenticate', challenge('invalid_request'));
-      return context.json({ error: 'OAuth credentials must use a Bearer header' }, 400);
+      return context.json({ error: 'Credentials must use a Bearer header' }, 400);
     }
     const token = context.req.header('Authorization')?.match(/^Bearer +([^\s]+)$/i)?.[1];
     if (!token) {
       context.header('WWW-Authenticate', challenge(undefined, BASE_SCOPES));
-      return context.json({ error: 'Connect with your Tembo account' }, 401);
+      return context.json({ error: config.issuer ? 'Connect with your Tembo account or provide a bearer credential' : 'Provide a Tembo API key or agent bearer credential' }, 401);
     }
 
     let identity;
     try {
       identity = await verifyIdentity(config.apiUrl, token, context.req.header('X-Agent-Org-Id'));
+      if (!config.issuer && Object.hasOwn(identity, 'clientId')) throw new AuthenticationError(401);
     } catch (error) {
       const status = error instanceof AuthenticationError ? error.status : 503;
       if (status === 401) context.header('WWW-Authenticate', challenge('invalid_token', BASE_SCOPES));

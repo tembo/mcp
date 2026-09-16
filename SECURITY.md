@@ -4,6 +4,8 @@ Report vulnerabilities privately to the Tembo maintainers through the product's 
 
 ## Hosted server boundaries
 
+- OAuth is optional. With no `MCP_OAUTH_ISSUER`, HTTP still requires verified API-key or agent bearer credentials, does not publish OAuth discovery metadata, and rejects OAuth identities even if the backing API has OAuth enabled. Self-hosted operators must point `TEMBO_API_URL` to their own API; no Clerk configuration is needed for bearer-only operation.
+
 - Hosted connections also accept Tembo API keys as bearer credentials. The API's existing key middleware checks revocation and derives organization identity from the stored key record. Keys do not acquire OAuth scopes or expiry. The MCP stores no server-wide API key. Both preflight and generated API calls verify the caller's credential; no authentication result is cached.
 - Trusted services can use the existing agent bearer secret with `X-Agent-Org-Id`. The API verifies the secret through `authAgent` and requires an existing organization on every public request. The MCP forwards only the verified agent organization; OAuth/API-key callers cannot override their organization this way. This secret is privileged across organizations, not tenant-bound: possession authorizes choosing any known organization. Never expose it to customers, model-visible arguments, or untrusted sandboxes. Keep it behind trusted backend credential handling, rotate it if exposed, and use organization-scoped API keys for untrusted clients. The separate internal MCP route is not opened by this change.
 
