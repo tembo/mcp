@@ -28,4 +28,4 @@ Clerk JWT OAuth access tokens are supported; ID tokens are not API credentials. 
 
 ## Production release gate
 
-OAuth access tokens are bound to the MCP resource. Clerk must have JWT OAuth access tokens and audience claims enabled, the API's trusted `MCP_OAUTH_RESOURCE` must exactly match the MCP server's canonical `MCP_PUBLIC_URL`, and the API rejects missing or different signed audiences. Never derive the expected audience from a caller-controlled header or request parameter. Verify this configuration and rejection behavior in every deployed environment.
+OAuth access tokens are bound to the MCP resource. Clerk must have JWT OAuth access tokens and audience claims enabled, the API selects the trusted canonical MCP audience from its SaaS deployment environment, and it rejects missing or different signed audiences. Never derive the expected audience from a caller-controlled header or request parameter. Verify this configuration and rejection behavior in every deployed environment.
