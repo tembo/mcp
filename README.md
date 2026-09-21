@@ -66,7 +66,7 @@ npm run dev
 
 For production, inject the environment and run `npm start` or the container. Configure clients with your deployed `/mcp` URL; the initial 401 response points them to public OAuth protected-resource metadata and requests the organization-selection scope.
 
-Clerk handles client registration, login, consent, and refresh. The companion API uses the Clerk SDK to verify opaque access tokens and expiry, resolves the selected organization through Clerk userinfo, and checks current membership. The hosted MCP process never stores a shared API key or Clerk secret. There are no custom registration, authorization, or token endpoints here.
+Clerk handles client registration, login, consent, and refresh. Clerk must issue JWT OAuth access tokens with the audience claim enabled. The companion API uses the Clerk SDK to verify the token signature, issuer, expiry, and exact MCP audience, resolves the selected organization through Clerk userinfo, and checks current membership. Configure `MCP_OAUTH_ISSUER` with the Clerk issuer and `MCP_OAUTH_RESOURCE` with the same canonical URL used by the MCP server's `MCP_PUBLIC_URL`. The hosted MCP process never stores a shared API key or Clerk secret. There are no custom registration, authorization, or token endpoints here.
 
 Deployment requires the companion [API OAuth changes](https://github.com/tembo/monorepo/pull/11327). Configure that API with:
 
