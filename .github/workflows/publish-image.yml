@@ -1,0 +1,106 @@
+name: Publish MCP image
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+concurrency:
+  group: publish-image-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.repository == 'tembo/mcp' && (github.event_name == 'release' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require reviewed source on main
+        run: git merge-base --is-ancestor HEAD origin/main
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run check:coverage
+      - run: npm audit --audit-level=high
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ECR_REPOSITORY: tembo-mcp
+      IMAGE_TAG: ${{ github.sha }}
+      ECR_REPO_PREFIX: ${{ vars.ECR_REPO_PREFIX }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check publishing configuration
+        env:
+          ECR_ROLE_ARN: ${{ vars.ECR_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          test -n "$ECR_REPO_PREFIX"
+          test -n "$ECR_ROLE_ARN"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.ECR_ROLE_ARN }}
+          aws-region: us-east-1
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Check immutable image
+        id: image
+        run: |
+          set -euo pipefail
+          result=$(aws ecr batch-get-image --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$IMAGE_TAG" --output json)
+          if jq -e '.images | length == 1' <<< "$result" >/dev/null; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            jq -e '.failures | length == 1 and .[0].failureCode == "ImageNotFound"' <<< "$result" >/dev/null
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@v3
+        if: steps.image.outputs.exists != 'true'
+      - name: Build and push
+        if: steps.image.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          tags: ${{ env.ECR_REPO_PREFIX }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/tembo/mcp
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=mcp
+          cache-to: type=gha,mode=max,scope=mcp
+      - name: Record published image
+        run: |
+          set -euo pipefail
+          digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$IMAGE_TAG" --query 'imageDetails[0].imageDigest' --output text)
+          {
+            echo '## MCP image published'
+            echo "Image: $ECR_REPO_PREFIX/$ECR_REPOSITORY:$IMAGE_TAG"
+            echo "Digest: $digest"
+            echo "Run Deploy MCP in tembo/monorepo with image-tag $IMAGE_TAG."
+            echo 'Promote the same image through dev, staging, and prod. Publishing does not deploy it.'
+          } >> "$GITHUB_STEP_SUMMARY"

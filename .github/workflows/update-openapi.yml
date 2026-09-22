@@ -1,0 +1,48 @@
+name: Update public OpenAPI
+on:
+  repository_dispatch:
+    types: [production-api-deployed]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 8 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: update-openapi
+  cancel-in-progress: false
+jobs:
+  update:
+    if: github.repository == 'tembo/mcp' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run update:openapi
+      - run: npm run check:coverage
+      - run: npm test
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        id: bot
+        with:
+          app-id: ${{ vars.CI_PUBLIC_BOT_APP_ID }}
+          private-key: ${{ secrets.CI_PUBLIC_BOT_PRIVATE_KEY }}
+          repositories: mcp
+      - uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676
+        with:
+          token: ${{ steps.bot.outputs.token }}
+          branch: tembo/update-openapi
+          delete-branch: true
+          add-paths: openapi/openapi.json
+          commit-message: 'chore: update public OpenAPI snapshot'
+          title: 'chore: update public OpenAPI snapshot'
+          body: |
+            Refreshes the bundled schema from https://api.tembo.io/public-api/openapi/public.
+            Validates full operation coverage and generated schemas before proposing changes.
+            Review API/tool changes before merging; release and redeploy to apply them.
+            This snapshot reflects the public API at fetch time, not an asserted deployment commit.
