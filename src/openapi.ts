@@ -57,6 +57,8 @@ export async function createCatalog(spec: string, apiUrl: string) {
       throw new Error('Unsupported public API operation');
     }
     const readOnly = ['GET', 'HEAD', 'OPTIONS'].includes(method);
+    const operation = manager.getOpenApiSpec()?.paths[path]?.[method.toLowerCase() as 'delete'];
+    const hasRequestBody = Boolean(operation && 'requestBody' in operation && operation.requestBody);
     const inputSchema = normalizeInputSchema(original.inputSchema);
     const tool: Tool = ToolSchema.parse({
       name: original.name,
@@ -65,7 +67,7 @@ export async function createCatalog(spec: string, apiUrl: string) {
       outputSchema: { type: 'object', properties: { data: {} }, required: ['data'], additionalProperties: false },
       annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, idempotentHint: readOnly, openWorldHint: true },
     });
-    return { id, tool, executionTool: { ...original, inputSchema: inputSchema as ExtendedTool['inputSchema'] }, method, path, readOnly, validate: validator.getValidator<Record<string, unknown>>(tool.inputSchema as Parameters<AjvJsonSchemaValidator['getValidator']>[0]) };
+    return { id, tool, executionTool: { ...original, inputSchema: inputSchema as ExtendedTool['inputSchema'] }, method, path, readOnly, hasRequestBody, validate: validator.getValidator<Record<string, unknown>>(tool.inputSchema as Parameters<AjvJsonSchemaValidator['getValidator']>[0]) };
   });
   const byName = new Map(entries.map((entry) => [entry.tool.name, entry]));
   if (!entries.length || byName.size !== entries.length) throw new Error('Invalid generated tool catalog');

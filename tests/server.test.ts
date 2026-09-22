@@ -51,7 +51,7 @@ before(async () => {
   });
   upstream.all('/public-api/*', async (context) => {
     const token = context.req.header('Authorization') ?? '';
-    requests.push({ method: context.req.method, path: context.req.path, query: new URL(context.req.url).search, token, agentOrganizationId: context.req.header('X-Agent-Org-Id'), body: ['POST', 'PUT', 'PATCH'].includes(context.req.method) ? await context.req.json() : undefined });
+    requests.push({ method: context.req.method, path: context.req.path, query: new URL(context.req.url).search, token, agentOrganizationId: context.req.header('X-Agent-Org-Id'), body: ['POST', 'PUT', 'PATCH', 'DELETE'].includes(context.req.method) ? await context.req.json() : undefined });
     if (context.req.path.endsWith('/forbidden')) return context.json({ token: 'secret-do-not-return', error: 'private internals' }, 403);
     return context.json({ ok: true });
   });
@@ -158,7 +158,7 @@ describe('OpenAPI-generated MCP', () => {
   it('invokes generated GET, POST, PUT, PATCH, DELETE and preserves query/body parameters', async () => {
     for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
       const path = ['GET', 'POST'].includes(method) ? '/v1/widgets' : '/v1/widgets/{widgetId}';
-      const args = method === 'GET' ? { limit: 7 } : { ...(path.includes('{') ? { widgetId: 'widget-2' } : {}), ...(method !== 'DELETE' ? { content: 'hello', settings: { nested: true } } : {}) };
+      const args = method === 'GET' ? { limit: 7 } : { ...(path.includes('{') ? { widgetId: 'widget-2' } : {}), content: 'hello', settings: { nested: true }, ...(method === 'DELETE' ? { force: true } : {}) };
       const result = await (await rpc('tools/call', { name: toolName(method, path), arguments: args }, 'writer')).json();
       assert.equal(result.result.isError, undefined, JSON.stringify(result));
     }
@@ -166,6 +166,8 @@ describe('OpenAPI-generated MCP', () => {
     assert.equal(requests[0]?.query, '?limit=7');
     assert.deepEqual(requests[2]?.body, { content: 'hello', settings: { nested: true } });
     assert.equal(requests[2]?.path, '/public-api/v1/widgets/widget-2');
+    assert.equal(requests[4]?.query, '?force=true');
+    assert.deepEqual(requests[4]?.body, { content: 'hello', settings: { nested: true } });
   });
 
   it('retains schemas from OpenAPI references', async () => {
@@ -191,7 +193,7 @@ describe('OpenAPI-generated MCP', () => {
   it('permits approved OAuth clients to call public mutations', async () => {
     const listed = await (await rpc('tools/list')).json();
     assert.equal(listed.result.tools.length, 10);
-    const response = await rpc('tools/call', { name: toolName('DELETE', '/v1/widgets/{widgetId}'), arguments: { widgetId: 'widget-1' } });
+    const response = await rpc('tools/call', { name: toolName('DELETE', '/v1/widgets/{widgetId}'), arguments: { widgetId: 'widget-1', content: 'delete' } });
     assert.equal(response.status, 200);
     assert.equal((await response.json()).result.isError, undefined);
     assert.equal(requests.length, 1);

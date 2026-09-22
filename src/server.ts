@@ -62,7 +62,9 @@ export function createServer(catalog: Catalog, options: { apiUrl: string; token:
       if (schema && typeof schema === 'object' && 'x-parameter-location' in schema && schema['x-parameter-location'] === 'path' && ['.', '..'].includes(String(validated.data[name]))) return failure('Path parameters must not be dot segments');
     }
     try {
-      const data: unknown = await client.executeApiCall(entry.id, validated.data);
+      const data: unknown = entry.method === 'DELETE' && entry.hasRequestBody
+        ? await executeDeleteWithBody(options, entry, validated.data)
+        : await client.executeApiCall(entry.id, validated.data);
       if (Buffer.byteLength(JSON.stringify(data ?? null)) > 1024 * 1024) return failure('API result exceeds 1 MiB; narrow the query or use API pagination. Do not automatically retry a write.');
       return result(data);
     } catch {
@@ -70,4 +72,45 @@ export function createServer(catalog: Catalog, options: { apiUrl: string; token:
     }
   });
   return server;
+}
+
+async function executeDeleteWithBody(
+  options: { apiUrl: string; token: string; agentOrganizationId?: string },
+  entry: Catalog['entries'][number],
+  parameters: Record<string, unknown>,
+): Promise<unknown> {
+  let path = entry.path;
+  const query = new URLSearchParams();
+  const body = { ...parameters };
+  const headers: Record<string, string> = {};
+  for (const [name, schema] of Object.entries(entry.executionTool.inputSchema.properties ?? {})) {
+    if (!Object.hasOwn(body, name) || !schema || typeof schema !== 'object' || !('x-parameter-location' in schema)) continue;
+    const location = schema['x-parameter-location'];
+    const value = body[name];
+    delete body[name];
+    if (location === 'path') path = path.replaceAll(`{${name}}`, encodeURIComponent(String(value)));
+    if (location === 'query') query.set(name, Array.isArray(value) ? value.join(',') : String(value));
+    if (location === 'header') {
+      if (['authorization', 'content-length', 'content-type', 'host', 'x-agent-org-id'].includes(name.toLowerCase())) throw new Error('Cannot override a system-controlled header');
+      if (String(value).includes('\r') || String(value).includes('\n')) throw new Error('Invalid header value');
+      headers[name] = String(value);
+    }
+  }
+  const url = new URL(`${options.apiUrl.replace(/\/$/, '')}${path}`);
+  url.search = query.toString();
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${options.token}`,
+      'Content-Type': 'application/json',
+      ...(options.agentOrganizationId ? { 'X-Agent-Org-Id': options.agentOrganizationId } : {}),
+      ...headers,
+    },
+    body: JSON.stringify(body),
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`API request failed (${response.status})`);
+  if (response.status === 204) return null;
+  return response.json();
 }

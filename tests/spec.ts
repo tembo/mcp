@@ -16,7 +16,7 @@ export const spec = {
       get: { operationId: 'retrieveWidget', responses: response },
       put: { operationId: 'replaceWidget', requestBody: body, responses: response },
       patch: { operationId: 'updateWidget', requestBody: body, responses: response },
-      delete: { operationId: 'deleteWidget', responses: response },
+      delete: { operationId: 'deleteWidget', parameters: [{ name: 'force', in: 'query', schema: { type: 'boolean' } }], requestBody: body, responses: response },
     },
     '/v1/billing': { get: { operationId: 'retrieveBilling', responses: response } },
     '/v1/api-keys': { post: { operationId: 'createApiKey', requestBody: body, responses: response } },
