@@ -22,6 +22,8 @@ The default compact interface exposes four tools:
 
 For example, search for `sessions`, inspect a returned operation with `get_tool_schema`, then supply its exact name and arguments to the appropriate call tool. The server rejects unknown operation names, invalid arguments, and attempts to send a mutation through the read tool. It is not an arbitrary-URL HTTP proxy or a code-execution sandbox.
 
+See the generated [API reference](docs/api-reference.md) for every public operation currently bundled with the MCP server.
+
 Set `MCP_TOOL_MODE=all` to expose each generated operation directly instead. `tools/list` paginates at 50 tools. Both modes reach the same public operations and enforce the same permissions. Tool results include structured `{ "data": ... }` output and a text representation for compatible clients; annotations are hints, not authorization rules.
 
 ## Run from source
@@ -117,7 +119,7 @@ This supports a later migration of public-API-backed agent tools; it does not re
 
 At startup the server reads the versioned `openapi/openapi.json` bundled in npm and Docker releases, without fetching a live schema. A maintained OpenAPI converter supplies operation metadata and request schemas; name abbreviation is disabled so operation names remain descriptive. The official MCP SDK supplies the protocol implementation. A shared adapter normalizes composed object schemas, validates arguments, and dispatches to the generated API client. No per-endpoint adapter is needed.
 
-Startup checks that all public operations generate unique tools. `npm run update:openapi` fetches the canonical public contract and validates coverage and schemas before updating the snapshot. The update workflow opens or updates a review PR on `production-api-deployed` repository dispatch, manual invocation on main, or a daily fallback. Unchanged schemas produce no diff. Merge the reviewed snapshot, then release/redeploy MCP; restarting an old release does not change its tools. SDK releases are independent.
+Startup checks that all public operations generate unique tools. `npm run update:openapi` fetches the canonical public contract and validates coverage and schemas before updating both the snapshot and generated API reference. CI verifies that the committed docs exactly match the bundled schema. The update workflow opens or updates a review PR on `production-api-deployed` repository dispatch, manual invocation on main, or a daily fallback. Unchanged schemas produce no diff. Merge the reviewed snapshot and docs together, then release/redeploy MCP; restarting an old release does not change its tools. SDK releases are independent.
 
 Automation requires the public CI GitHub App installed on this repository with contents and pull-request write permissions, `CI_PUBLIC_BOT_APP_ID` as a repository variable, and `CI_PUBLIC_BOT_PRIVATE_KEY` as a secret (reuse the SDK/docs bot). The companion monorepo workflow sends `production-api-deployed` independently to this repo and the SDK after a successful production API rollout. Its existing `CI_BOT_APP_ID`/`CI_BOT_PRIVATE_KEY` bot must also be installed on `tembo/mcp` with contents write permission to send that event. Until both PRs are merged and configured, use the manual schema-update trigger. npm publication remains separate.
 

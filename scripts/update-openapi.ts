@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createCatalog, validateOpenApi } from '../src/openapi.js';
+import { generateOpenApiDocs } from './generate-openapi-docs.js';
 import { normalizeOpenApi } from './normalize-openapi.js';
 
 const source = 'https://api.tembo.io/public-api/openapi/public';
@@ -9,5 +10,7 @@ const content = `${JSON.stringify(normalizeOpenApi(await response.json()), null,
 await validateOpenApi(content, 'https://api.tembo.io');
 const catalog = await createCatalog(content, 'https://api.tembo.io');
 await mkdir(new URL('../openapi/', import.meta.url), { recursive: true });
+await mkdir(new URL('../docs/', import.meta.url), { recursive: true });
 await writeFile(new URL('../openapi/openapi.json', import.meta.url), content);
-console.log(`Updated bundled schema from ${source}: ${catalog.entries.length} operations.`);
+await writeFile(new URL('../docs/api-reference.md', import.meta.url), await generateOpenApiDocs(content));
+console.log(`Updated bundled schema and API reference from ${source}: ${catalog.entries.length} operations.`);

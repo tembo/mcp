@@ -38,11 +38,13 @@ jobs:
           token: ${{ steps.bot.outputs.token }}
           branch: tembo/update-openapi
           delete-branch: true
-          add-paths: openapi/openapi.json
+          add-paths: |
+            openapi/openapi.json
+            docs/api-reference.md
           commit-message: 'chore: update public OpenAPI snapshot'
           title: 'chore: update public OpenAPI snapshot'
           body: |
-            Refreshes the bundled schema from https://api.tembo.io/public-api/openapi/public.
-            Validates full operation coverage and generated schemas before proposing changes.
+            Refreshes the bundled schema and generated API reference from https://api.tembo.io/public-api/openapi/public.
+            Validates full operation coverage, generated schemas, and documentation before proposing changes.
             Review API/tool changes before merging; release and redeploy to apply them.
             This snapshot reflects the public API at fetch time, not an asserted deployment commit.
