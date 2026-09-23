@@ -9,7 +9,7 @@ One package, one generated catalog, two standard transports:
 
 Both transports use the official MCP TypeScript SDK v2 serving entries and support the `2026-07-28` protocol plus legacy clients using the `2025-11-25` handshake. The old five-tool implementation is replaced, not maintained as a separate server.
 
-## Full API access without a giant tool list
+## Full API access
 
 By default, each generated API operation is exposed directly as an MCP tool. This lets clients use their native tool discovery and search behavior without an extra MCP-specific search layer.
 
@@ -117,7 +117,7 @@ This supports a later migration of public-API-backed agent tools; it does not re
 
 ## OpenAPI lifecycle
 
-At startup the server reads the versioned `openapi/openapi.json` bundled in npm and Docker releases, without fetching a live schema. A maintained OpenAPI converter supplies operation metadata and request schemas; name abbreviation is disabled so operation names remain descriptive. The official MCP SDK supplies the protocol implementation. A shared adapter normalizes composed object schemas, validates arguments, and dispatches to the generated API client. No per-endpoint adapter is needed.
+At startup the server reads the versioned `openapi/openapi.json` bundled in npm and Docker releases, without fetching a live schema. A maintained OpenAPI converter supplies operation metadata and request schemas; name abbreviation is disabled so operation names remain descriptive. Tool names are generated from OpenAPI operation IDs in lowercase kebab case (for example, `list-sessions`) and validated against the MCP tool-name grammar. Rename an operation in the OpenAPI contract rather than adding a handwritten MCP alias. The official MCP SDK supplies the protocol implementation. A shared adapter normalizes composed object schemas, validates arguments, and dispatches to the generated API client. No per-endpoint adapter is needed.
 
 Startup checks that all public operations generate unique tools. `npm run update:openapi` fetches the canonical public contract and validates coverage and schemas before updating the snapshot. The update workflow opens or updates a review PR on `production-api-deployed` repository dispatch, manual invocation on main, or a daily fallback. Unchanged schemas produce no diff. Merge the reviewed snapshot, then release/redeploy MCP; restarting an old release does not change its tools. SDK releases are independent.
 
