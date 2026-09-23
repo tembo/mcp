@@ -10,7 +10,7 @@ import { createServer } from './server.js';
 async function main() {
   const { values } = parseArgs({ options: { transport: { type: 'string', default: 'stdio' }, 'allow-writes': { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h' } } });
   if (values.help) {
-    console.log('Usage: tembo-mcp [--transport stdio|http] [--allow-writes]\n\nstdio: TEMBO_API_KEY required; read-only unless --allow-writes.\nhttp: MCP_PUBLIC_URL required; bearer API keys or agent credentials grant access subject to API permissions. MCP_OAUTH_ISSUER optionally enables Clerk OAuth.\nMCP_TOOL_MODE=compact (default) or all. TEMBO_API_URL defaults to https://api.tembo.io.\nUses the bundled OpenAPI snapshot; MCP_OPENAPI_PATH overrides it with a local file.');
+    console.log('Usage: tembo-mcp [--transport stdio|http] [--allow-writes]\n\nstdio: TEMBO_API_KEY required; read-only unless --allow-writes.\nhttp: MCP_PUBLIC_URL required; bearer API keys or agent credentials grant access subject to API permissions. MCP_OAUTH_ISSUER optionally enables Clerk OAuth.\nMCP_TOOL_MODE=all (default) or compact. TEMBO_API_URL defaults to https://api.tembo.io.\nUses the bundled OpenAPI snapshot; MCP_OPENAPI_PATH overrides it with a local file.');
     return;
   }
   if (!['http', 'stdio'].includes(values.transport)) throw new Error('Invalid transport');

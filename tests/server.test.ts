@@ -292,6 +292,9 @@ describe('Self-hosted HTTP without Clerk', () => {
 });
 
 describe('OAuth transport', () => {
+  it('exposes generated tools directly by default', () => {
+    assert.equal(loadConfig({ MCP_PUBLIC_URL: 'http://localhost:3000/mcp' }).toolMode, 'all');
+  });
   it('publishes canonical metadata without authentication', async () => {
     const response = await app.request('/.well-known/oauth-protected-resource/mcp', { headers: { Host: 'attacker.example.com' } });
     const metadata = await response.json();

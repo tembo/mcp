@@ -14,7 +14,7 @@ const environmentSchema = z.object({
   MCP_PUBLIC_URL: httpUrl,
   MCP_OAUTH_ISSUER: z.preprocess((value) => value === '' ? undefined : value, httpUrl.refine((value) => new URL(value).protocol === 'https:' && new URL(value).pathname === '/', 'Use the Clerk HTTPS issuer origin').optional()),
   TEMBO_API_URL: httpUrl.default('https://api.tembo.io'),
-  MCP_TOOL_MODE: z.enum(['compact', 'all']).default('compact'),
+  MCP_TOOL_MODE: z.enum(['compact', 'all']).default('all'),
   MCP_OPENAPI_PATH: z.string().min(1).optional(),
   MCP_ALLOWED_ORIGINS: z.string().default(''),
 });

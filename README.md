@@ -11,7 +11,9 @@ Both transports use the official MCP TypeScript SDK v2 serving entries and suppo
 
 ## Full API access without a giant tool list
 
-The default compact interface exposes four tools:
+By default, each generated API operation is exposed directly as an MCP tool. This lets clients use their native tool discovery and search behavior without an extra MCP-specific search layer.
+
+Set `MCP_TOOL_MODE=compact` to expose a four-tool compatibility interface instead:
 
 | Tool | Purpose |
 | --- | --- |
@@ -22,7 +24,7 @@ The default compact interface exposes four tools:
 
 For example, search for `sessions`, inspect a returned operation with `get_tool_schema`, then supply its exact name and arguments to the appropriate call tool. The server rejects unknown operation names, invalid arguments, and attempts to send a mutation through the read tool. It is not an arbitrary-URL HTTP proxy or a code-execution sandbox.
 
-Set `MCP_TOOL_MODE=all` to expose each generated operation directly instead. `tools/list` paginates at 50 tools. Both modes reach the same public operations and enforce the same permissions. Tool results include structured `{ "data": ... }` output and a text representation for compatible clients; annotations are hints, not authorization rules.
+`tools/list` paginates direct tools at 50 operations. Both modes reach the same public operations and enforce the same permissions. Tool results include structured `{ "data": ... }` output and a text representation for compatible clients; annotations are hints, not authorization rules.
 
 ## Run from source
 
@@ -85,7 +87,7 @@ In Clerk, enable Organizations, require PKCE, and configure default OAuth scopes
 | Variable | Applies to | Default / meaning |
 | --- | --- | --- |
 | `TEMBO_API_URL` | Both | `https://api.tembo.io`; local deployments must include the API prefix and `/public-api` |
-| `MCP_TOOL_MODE` | Both | `compact`; use `all` for individual generated tools |
+| `MCP_TOOL_MODE` | Both | `all`; use `compact` for the four-tool compatibility interface |
 | `MCP_OPENAPI_PATH` | Both | Optional local JSON file for development/self-hosting; defaults to the bundled snapshot |
 | `TEMBO_API_KEY` | Stdio | Required; forwarded only to the configured API |
 | `MCP_PUBLIC_URL` | HTTP | Required canonical HTTPS URL ending exactly in `/mcp`; HTTP allowed on loopback |
