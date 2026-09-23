@@ -9,9 +9,11 @@ One package, one generated catalog, two standard transports:
 
 Both transports use the official MCP TypeScript SDK v2 serving entries and support the `2026-07-28` protocol plus legacy clients using the `2025-11-25` handshake. The old five-tool implementation is replaced, not maintained as a separate server.
 
-## Full API access without a giant tool list
+## Full API access
 
-The default compact interface exposes four tools:
+By default, each generated API operation is exposed directly as an MCP tool. This lets clients use their native tool discovery and search behavior without an extra MCP-specific search layer.
+
+Set `MCP_TOOL_MODE=compact` to expose a four-tool compatibility interface instead:
 
 | Tool | Purpose |
 | --- | --- |
@@ -22,7 +24,7 @@ The default compact interface exposes four tools:
 
 For example, search for `sessions`, inspect a returned operation with `get_tool_schema`, then supply its exact name and arguments to the appropriate call tool. The server rejects unknown operation names, invalid arguments, and attempts to send a mutation through the read tool. It is not an arbitrary-URL HTTP proxy or a code-execution sandbox.
 
-Set `MCP_TOOL_MODE=all` to expose each generated operation directly instead. `tools/list` paginates at 50 tools. Both modes reach the same public operations and enforce the same permissions. Tool results include structured `{ "data": ... }` output and a text representation for compatible clients; annotations are hints, not authorization rules.
+`tools/list` paginates direct tools at 50 operations. Both modes reach the same public operations and enforce the same permissions. Tool results include structured `{ "data": ... }` output and a text representation for compatible clients; annotations are hints, not authorization rules.
 
 ## Run from source
 
@@ -85,7 +87,7 @@ In Clerk, enable Organizations, require PKCE, and configure default OAuth scopes
 | Variable | Applies to | Default / meaning |
 | --- | --- | --- |
 | `TEMBO_API_URL` | Both | `https://api.tembo.io`; local deployments must include the API prefix and `/public-api` |
-| `MCP_TOOL_MODE` | Both | `compact`; use `all` for individual generated tools |
+| `MCP_TOOL_MODE` | Both | `all`; use `compact` for the four-tool compatibility interface |
 | `MCP_OPENAPI_PATH` | Both | Optional local JSON file for development/self-hosting; defaults to the bundled snapshot |
 | `TEMBO_API_KEY` | Stdio | Required; forwarded only to the configured API |
 | `MCP_PUBLIC_URL` | HTTP | Required canonical HTTPS URL ending exactly in `/mcp`; HTTP allowed on loopback |
@@ -115,7 +117,7 @@ This supports a later migration of public-API-backed agent tools; it does not re
 
 ## OpenAPI lifecycle
 
-At startup the server reads the versioned `openapi/openapi.json` bundled in npm and Docker releases, without fetching a live schema. A maintained OpenAPI converter supplies operation metadata and request schemas; name abbreviation is disabled so operation names remain descriptive. The official MCP SDK supplies the protocol implementation. A shared adapter normalizes composed object schemas, validates arguments, and dispatches to the generated API client. No per-endpoint adapter is needed.
+At startup the server reads the versioned `openapi/openapi.json` bundled in npm and Docker releases, without fetching a live schema. A maintained OpenAPI converter supplies operation metadata and request schemas; name abbreviation is disabled so operation names remain descriptive. Tool names are generated from OpenAPI operation IDs in lowercase kebab case (for example, `list-sessions`) and validated against the MCP tool-name grammar. Rename an operation in the OpenAPI contract rather than adding a handwritten MCP alias. The official MCP SDK supplies the protocol implementation. A shared adapter normalizes composed object schemas, validates arguments, and dispatches to the generated API client. No per-endpoint adapter is needed.
 
 Startup checks that all public operations generate unique tools. `npm run update:openapi` fetches the canonical public contract and validates coverage and schemas before updating the snapshot. The update workflow opens or updates a review PR on `production-api-deployed` repository dispatch, manual invocation on main, or a daily fallback. Unchanged schemas produce no diff. Merge the reviewed snapshot, then release/redeploy MCP; restarting an old release does not change its tools. SDK releases are independent.
 

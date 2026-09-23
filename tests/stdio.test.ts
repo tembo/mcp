@@ -37,13 +37,9 @@ for (const modern of [false, true]) {
     try {
       await client.connect(transport);
       assert.equal(client.getProtocolEra(), modern ? 'modern' : 'legacy');
-      assert.equal((await client.listTools()).tools.length, 4);
-      const search = await client.callTool({ name: 'search_tools', arguments: { query: 'widgets' } });
-      const data = search.structuredContent as { data: { tools: { name: string; method: string }[] } };
-      const read = data.data.tools.find((tool) => tool.method === 'GET')!;
-      const write = data.data.tools.find((tool) => tool.method === 'POST')!;
-      assert.equal((await client.callTool({ name: 'call_write_tool', arguments: { name: write.name, arguments: { content: 'blocked' } } })).isError, true);
-      assert.deepEqual((await client.callTool({ name: 'call_read_tool', arguments: { name: read.name } })).structuredContent, { data: { ok: true } });
+      assert.equal((await client.listTools()).tools.length, 10);
+      assert.equal((await client.callTool({ name: 'create-widget', arguments: { content: 'blocked' } })).isError, true);
+      assert.deepEqual((await client.callTool({ name: 'list-widgets' })).structuredContent, { data: { ok: true } });
       assert.equal(requests.at(-1)?.authorization, 'Bearer test-only-key');
       assert.ok(requests.every((request) => request.method === 'GET'));
     } finally { await client.close(); }
@@ -55,10 +51,7 @@ it('allows local mutations only with the explicit CLI flag', async () => {
   const transport = new StdioClientTransport({ command: process.execPath, args: ['--import', 'tsx', 'src/index.ts', '--allow-writes'], cwd: process.cwd(), env: { TEMBO_API_KEY: 'test-only-key', TEMBO_API_URL: apiUrl, MCP_OPENAPI_PATH: schemaPath }, stderr: 'pipe' });
   try {
     await client.connect(transport);
-    const found = await client.callTool({ name: 'search_tools', arguments: { query: 'widgets' } });
-    const data = found.structuredContent as { data: { tools: { name: string; method: string }[] } };
-    const write = data.data.tools.find((tool) => tool.method === 'POST')!;
-    const result = await client.callTool({ name: 'call_write_tool', arguments: { name: write.name, arguments: { content: 'allowed' } } });
+    const result = await client.callTool({ name: 'create-widget', arguments: { content: 'allowed' } });
     assert.deepEqual(result.structuredContent, { data: { ok: true } });
     assert.equal(requests.at(-1)?.method, 'POST');
   } finally { await client.close(); }
