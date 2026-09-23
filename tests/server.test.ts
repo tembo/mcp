@@ -338,12 +338,28 @@ describe('OAuth transport', () => {
     assert.equal((await app.request('/mcp', { method: 'POST', headers: { Origin: 'https://attacker.example.com', Authorization: 'Bearer writer' } })).status, 403);
   });
   it('bounds request size', async () => {
-    assert.equal((await app.request('/mcp', { method: 'POST', headers: { Authorization: 'Bearer writer' }, body: 'x'.repeat(256 * 1024 + 1) })).status, 413);
+    const supportedArtifact = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'missing', arguments: { content: 'x'.repeat(5 * 1024 * 1024) } } });
+    assert.notEqual((await app.request('/mcp', { method: 'POST', headers: { Authorization: 'Bearer writer', 'Content-Type': 'application/json' }, body: supportedArtifact })).status, 413);
+    assert.equal((await app.request('/mcp', { method: 'POST', headers: { Authorization: 'Bearer writer' }, body: 'x'.repeat(12 * 1024 * 1024 + 1) })).status, 413);
   });
   it('rejects insecure configuration', () => {
     for (const apiUrl of ['http://api.example.com', 'https://user:pass@api.example.com', 'https://api.example.com?redirect=1']) {
       assert.throws(() => loadConfig({ MCP_PUBLIC_URL: 'http://localhost:3000/mcp', MCP_OAUTH_ISSUER: 'https://clerk.example.com', TEMBO_API_URL: apiUrl }));
     }
+  });
+
+  it('allows explicit HTTP self-hosting without OAuth', () => {
+    const selfHosted = loadConfig({
+      MCP_PUBLIC_URL: 'http://192.0.2.10/mcp',
+      MCP_ALLOW_INSECURE_HTTP: 'true',
+      TEMBO_API_URL: 'http://localhost:9854/public-api',
+    });
+    assert.equal(selfHosted.publicUrl, 'http://192.0.2.10/mcp');
+    assert.throws(() => loadConfig({
+      MCP_PUBLIC_URL: 'http://192.0.2.10/mcp',
+      MCP_ALLOW_INSECURE_HTTP: 'true',
+      MCP_OAUTH_ISSUER: 'https://clerk.example.com',
+    }));
   });
 });
 

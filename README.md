@@ -89,6 +89,7 @@ In Clerk, enable Organizations, require PKCE, and configure default OAuth scopes
 | `MCP_OPENAPI_PATH` | Both | Optional local JSON file for development/self-hosting; defaults to the bundled snapshot |
 | `TEMBO_API_KEY` | Stdio | Required; forwarded only to the configured API |
 | `MCP_PUBLIC_URL` | HTTP | Required canonical HTTPS URL ending exactly in `/mcp`; HTTP allowed on loopback |
+| `MCP_ALLOW_INSECURE_HTTP` | HTTP | Set to `true` only for self-hosted deployments that expose MCP over private HTTP; cannot be used with OAuth |
 | `MCP_OAUTH_ISSUER` | HTTP | Optional Clerk HTTPS issuer origin; unset or empty disables OAuth, not bearer API-key/agent auth |
 | `MCP_ALLOWED_ORIGINS` | HTTP | Optional comma-separated browser origins, in addition to the server's own origin |
 | `HOST` | HTTP | `127.0.0.1`; container sets `0.0.0.0` |
@@ -107,7 +108,7 @@ docker run --rm --env-file .env -p 3000:3000 tembo-mcp
 
 ## Self-hosted without Clerk
 
-Run the same HTTP server with `MCP_PUBLIC_URL` pointing to its canonical `/mcp` endpoint and `TEMBO_API_URL` pointing to your own API, including `/public-api` (and any API prefix). Leave `MCP_OAUTH_ISSUER` unset or empty. No Clerk account, Clerk secret, OAuth registration, or login is required. The API must include the companion auth-context changes.
+Run the same HTTP server with `MCP_PUBLIC_URL` pointing to its canonical `/mcp` endpoint and `TEMBO_API_URL` pointing to your own API, including `/public-api` (and any API prefix). Leave `MCP_OAUTH_ISSUER` unset or empty. When the MCP endpoint uses non-loopback HTTP on a trusted private network, set `MCP_ALLOW_INSECURE_HTTP=true`; OAuth always requires HTTPS. No Clerk account, Clerk secret, OAuth registration, or login is required. The API must include the companion auth-context changes.
 
 Clients authenticate using an API key, or trusted backend services use the existing agent secret plus `X-Agent-Org-Id`. Every request is still authenticated by your API. Without an issuer, OAuth discovery endpoints are absent and authentication errors advertise bearer credentials, not a Clerk login. Configuring an issuer enables OAuth alongside those credential types; configure the API with the same issuer and its matching Clerk secret.
 

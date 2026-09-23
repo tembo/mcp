@@ -7,6 +7,8 @@ import type { Config } from './config.js';
 import { createCatalog } from './openapi.js';
 import { createServer } from './server.js';
 
+const MAX_MCP_REQUEST_SIZE_BYTES = 12 * 1024 * 1024;
+
 export async function createApp(config: Config, openapi: string) {
   const app = new Hono();
   const publicUrl = new URL(config.publicUrl);
@@ -49,7 +51,7 @@ export async function createApp(config: Config, openapi: string) {
     context.header('Cache-Control', 'no-store');
   });
   app.use('/mcp', bodyLimit({
-    maxSize: 256 * 1024,
+    maxSize: MAX_MCP_REQUEST_SIZE_BYTES,
     onError: (context) => context.json({ error: 'Request body too large' }, 413),
   }));
   app.all('/mcp', async (context) => {
