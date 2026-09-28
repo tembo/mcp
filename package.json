@@ -51,7 +51,7 @@
     "@ivotoby/openapi-mcp-server": "^1.16.1",
     "@modelcontextprotocol/server": "^2.0.0",
     "@modelcontextprotocol/core": "^2.0.0",
-    "hono": "^4.13.0",
+    "hono": "^4.13.10",
     "zod": "^4.0.0"
   },
   "devDependencies": {
