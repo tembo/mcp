@@ -289,6 +289,12 @@ describe('Self-hosted HTTP without Clerk', () => {
       assert.throws(() => loadConfig({ MCP_PUBLIC_URL: config.publicUrl, MCP_OAUTH_ISSUER: issuer }));
     }
   });
+
+  it('allows explicitly opted-in self-hosted HTTP only without OAuth', () => {
+    assert.equal(loadConfig({ MCP_PUBLIC_URL: 'http://192.0.2.10/mcp', MCP_ALLOW_INSECURE_HTTP: 'true' }).publicUrl, 'http://192.0.2.10/mcp');
+    assert.throws(() => loadConfig({ MCP_PUBLIC_URL: 'http://192.0.2.10/mcp' }));
+    assert.throws(() => loadConfig({ MCP_PUBLIC_URL: 'http://192.0.2.10/mcp', MCP_ALLOW_INSECURE_HTTP: 'true', MCP_OAUTH_ISSUER: 'https://clerk.example.com' }));
+  });
 });
 
 describe('OAuth transport', () => {

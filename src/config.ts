@@ -1,9 +1,16 @@
 import { z } from 'zod';
 
-const httpUrl = z.string().url().superRefine((value, context) => {
+const webUrl = z.string().url().superRefine((value, context) => {
+  const url = new URL(value);
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    context.addIssue({ code: 'custom', message: 'Use HTTP or HTTPS without credentials, query, or fragment' });
+  }
+});
+
+const httpUrl = webUrl.superRefine((value, context) => {
   const url = new URL(value);
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) || url.username || url.password || url.search || url.hash) {
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
     context.addIssue({ code: 'custom', message: 'Use HTTPS, or HTTP on loopback, without credentials, query, or fragment' });
   }
 });
@@ -11,12 +18,24 @@ const httpUrl = z.string().url().superRefine((value, context) => {
 const environmentSchema = z.object({
   HOST: z.string().default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  MCP_PUBLIC_URL: httpUrl,
+  MCP_PUBLIC_URL: webUrl,
   MCP_OAUTH_ISSUER: z.preprocess((value) => value === '' ? undefined : value, httpUrl.refine((value) => new URL(value).protocol === 'https:' && new URL(value).pathname === '/', 'Use the Clerk HTTPS issuer origin').optional()),
+  MCP_ALLOW_INSECURE_HTTP: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   TEMBO_API_URL: httpUrl.default('https://api.tembo.io'),
   MCP_TOOL_MODE: z.enum(['compact', 'all']).default('all'),
   MCP_OPENAPI_PATH: z.string().min(1).optional(),
   MCP_ALLOWED_ORIGINS: z.string().default(''),
+}).superRefine((environment, context) => {
+  const publicUrl = new URL(environment.MCP_PUBLIC_URL);
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(publicUrl.hostname);
+  if (publicUrl.protocol === 'http:' && !loopback) {
+    if (!environment.MCP_ALLOW_INSECURE_HTTP) {
+      context.addIssue({ code: 'custom', path: ['MCP_PUBLIC_URL'], message: 'Non-loopback HTTP requires MCP_ALLOW_INSECURE_HTTP=true' });
+    }
+    if (environment.MCP_OAUTH_ISSUER) {
+      context.addIssue({ code: 'custom', path: ['MCP_OAUTH_ISSUER'], message: 'OAuth requires an HTTPS MCP_PUBLIC_URL' });
+    }
+  }
 });
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
