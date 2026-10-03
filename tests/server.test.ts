@@ -6,7 +6,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { ToolsManager } from '@ivotoby/openapi-mcp-server';
 import type { ExtendedTool } from '@ivotoby/openapi-mcp-server';
 import { createApp } from '../src/app.js';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, loadStdioConfig } from '../src/config.js';
 import { createCatalog, generatorConfig, validateOpenApi } from '../src/openapi.js';
 import { spec } from './spec.js';
 
@@ -219,6 +219,10 @@ describe('OpenAPI-generated MCP', () => {
 });
 
 describe('Self-hosted HTTP without Clerk', () => {
+  it('preserves stdio configuration loading', () => {
+    assert.equal(loadStdioConfig({ TEMBO_API_KEY: 'test-only-key' }).apiKey, 'test-only-key');
+  });
+
   async function bearerApp(issuer?: string, mode: 'all' | 'compact' = 'all') {
     return createApp(loadConfig({ MCP_PUBLIC_URL: config.publicUrl, TEMBO_API_URL: config.apiUrl, MCP_TOOL_MODE: mode, ...(issuer === undefined ? {} : { MCP_OAUTH_ISSUER: issuer }) }), JSON.stringify(spec));
   }
@@ -288,6 +292,12 @@ describe('Self-hosted HTTP without Clerk', () => {
     for (const issuer of ['not-a-url', 'http://localhost:3000', 'https://clerk.example.com/path', ' ']) {
       assert.throws(() => loadConfig({ MCP_PUBLIC_URL: config.publicUrl, MCP_OAUTH_ISSUER: issuer }));
     }
+  });
+
+  it('allows explicitly opted-in self-hosted HTTP only without OAuth', () => {
+    assert.equal(loadConfig({ MCP_PUBLIC_URL: 'http://192.0.2.10/mcp', MCP_ALLOW_INSECURE_HTTP: 'true' }).publicUrl, 'http://192.0.2.10/mcp');
+    assert.throws(() => loadConfig({ MCP_PUBLIC_URL: 'http://192.0.2.10/mcp' }));
+    assert.throws(() => loadConfig({ MCP_PUBLIC_URL: 'http://192.0.2.10/mcp', MCP_ALLOW_INSECURE_HTTP: 'true', MCP_OAUTH_ISSUER: 'https://clerk.example.com' }));
   });
 });
 
