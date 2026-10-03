@@ -350,8 +350,12 @@ describe('OAuth transport', () => {
   it('rejects cross-origin browser requests', async () => {
     assert.equal((await app.request('/mcp', { method: 'POST', headers: { Origin: 'https://attacker.example.com', Authorization: 'Bearer writer' } })).status, 403);
   });
-  it('bounds request size', async () => {
-    assert.equal((await app.request('/mcp', { method: 'POST', headers: { Authorization: 'Bearer writer' }, body: 'x'.repeat(256 * 1024 + 1) })).status, 413);
+  it('accepts practical artifact payloads and rejects oversized requests', async () => {
+    const headers = { Authorization: 'Bearer writer', 'Content-Type': 'application/json' };
+    const accepted = await rpc('tools/list', { padding: 'x'.repeat(5 * 1024 * 1024) }, 'writer');
+    assert.equal(accepted.status, 200);
+    assert.ok(Array.isArray((await accepted.json()).result?.tools));
+    assert.equal((await app.request('/mcp', { method: 'POST', headers, body: JSON.stringify({ padding: 'x'.repeat(12 * 1024 * 1024) }) })).status, 413);
   });
   it('rejects insecure configuration', () => {
     for (const apiUrl of ['http://api.example.com', 'https://user:pass@api.example.com', 'https://api.example.com?redirect=1']) {
