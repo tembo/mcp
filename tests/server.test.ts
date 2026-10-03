@@ -342,8 +342,9 @@ describe('OAuth transport', () => {
   });
   it('accepts practical artifact payloads and rejects oversized requests', async () => {
     const headers = { Authorization: 'Bearer writer', 'Content-Type': 'application/json' };
-    const accepted = await app.request('/mcp', { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { padding: 'x'.repeat(5 * 1024 * 1024) } }) });
-    assert.notEqual(accepted.status, 413);
+    const accepted = await rpc('tools/list', { padding: 'x'.repeat(5 * 1024 * 1024) }, 'writer');
+    assert.equal(accepted.status, 200);
+    assert.ok(Array.isArray((await accepted.json()).result?.tools));
     assert.equal((await app.request('/mcp', { method: 'POST', headers, body: JSON.stringify({ padding: 'x'.repeat(12 * 1024 * 1024) }) })).status, 413);
   });
   it('rejects insecure configuration', () => {
