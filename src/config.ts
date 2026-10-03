@@ -25,7 +25,9 @@ const environmentSchema = z.object({
   MCP_TOOL_MODE: z.enum(['compact', 'all']).default('all'),
   MCP_OPENAPI_PATH: z.string().min(1).optional(),
   MCP_ALLOWED_ORIGINS: z.string().default(''),
-}).superRefine((environment, context) => {
+});
+
+const httpEnvironmentSchema = environmentSchema.superRefine((environment, context) => {
   const publicUrl = new URL(environment.MCP_PUBLIC_URL);
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(publicUrl.hostname);
   if (publicUrl.protocol === 'http:' && !loopback) {
@@ -39,7 +41,7 @@ const environmentSchema = z.object({
 });
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
-  const parsed = environmentSchema.parse(environment);
+  const parsed = httpEnvironmentSchema.parse(environment);
   if (new URL(parsed.MCP_PUBLIC_URL).pathname !== '/mcp') {
     throw new Error('MCP_PUBLIC_URL must end in /mcp (no trailing slash)');
   }
