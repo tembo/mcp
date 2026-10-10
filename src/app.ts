@@ -105,7 +105,10 @@ export async function createApp(config: Config, openapi: string) {
       onChange: (uri) => handler.notify.resourceUpdated(uri),
       onEnd: () => controller.abort(),
     }, controller.signal);
-    if (error) return context.json({ jsonrpc: '2.0', id: listen.id, error: { code: -32602, message: error } });
+    if (error || controller.signal.aborted) {
+      controller.abort();
+      return context.json({ jsonrpc: '2.0', id: listen.id, error: { code: -32602, message: error ?? 'Live updates ended before the subscription started' } });
+    }
     const response = await handler.fetch(new Request(context.req.raw, { signal: controller.signal }), { authInfo });
     return releaseWith(response, controller);
   });

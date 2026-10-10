@@ -184,14 +184,20 @@ export function withLiveSubscriptions(inner: Transport, credentials: ApiCredenti
         const requested = notifications && typeof notifications === 'object' && 'resourceSubscriptions' in notifications ? notifications.resourceSubscriptions : undefined;
         const uris = Array.isArray(requested) ? requested.filter((uri): uri is string => typeof uri === 'string' && Boolean(sessionIdFromUri(uri))) : [];
         if (uris.length) {
-          // If access is revoked, cancel the SDK's subscription and send the terminal listen result
-          // so the client sees the subscription close instead of silently receiving nothing.
+          // If access is revoked after the SDK registered the listen, cancel that registration and send
+          // the terminal listen result so the client sees it close. If it is revoked while another
+          // session is still connecting, the listen is never registered and is rejected instead.
+          let registered = false;
+          let ended = false;
           const error = await subscribe(`listen:${String(id)}`, uris, () => {
+            ended = true;
+            if (!registered) return;
             outer.onmessage?.({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id } });
             void inner.send({ jsonrpc: '2.0', id, result: { resultType: 'complete', _meta: { 'io.modelcontextprotocol/subscriptionId': id } } })
               .catch((sendError: unknown) => outer.onerror?.(sendError instanceof Error ? sendError : new Error(String(sendError))));
           });
-          if (error) return void await reply(id, error);
+          if (error || ended) return void await reply(id, error ?? 'Live updates ended before the subscription started');
+          registered = true;
         }
       } else if (method === 'notifications/cancelled' && (typeof params.requestId === 'string' || typeof params.requestId === 'number')) {
         stop(`listen:${String(params.requestId)}`);

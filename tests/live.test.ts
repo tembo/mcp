@@ -15,6 +15,7 @@ import { loadConfig } from '../src/config.js';
 const SESSION = '11111111-1111-4111-8111-111111111111';
 const FORBIDDEN = '22222222-2222-4222-8222-222222222222';
 const REJECTED = '33333333-3333-4333-8333-333333333333';
+const DELAYED = '44444444-4444-4444-8444-444444444444';
 const uri = (sessionId: string) => `tembo://sessions/${sessionId}/messages`;
 const response = { '200': { description: 'Success', content: { 'application/json': { schema: { type: 'object' } } } } };
 const liveSpec = {
@@ -31,6 +32,9 @@ const liveSpec = {
 };
 
 const sockets = new Set<Socket>();
+const socketSessions = new Map<Socket, string>();
+const held: Socket[] = [];
+let refusals = 0;
 const tickets = new Map<string, string>();
 const bodies: unknown[] = [];
 let revoked = false;
@@ -65,7 +69,10 @@ before(async () => {
   upstream.post('/public-api/v1/messages/live', async (context) => {
     const { scope } = await context.req.json();
     if (scope.sessionId === FORBIDDEN) return context.json({ error: 'Session not found' }, 404);
-    if (revoked) return context.json({ error: 'Forbidden' }, 403);
+    if (revoked) {
+      refusals += 1;
+      return context.json({ error: 'Forbidden' }, 403);
+    }
     // Issue a ticket the WebSocket endpoint will not accept, so the upgrade is rejected with 401.
     if (scope.sessionId === REJECTED) return context.json({ ticket: 'unknown-ticket' });
     const ticket = randomUUID();
@@ -80,13 +87,18 @@ before(async () => {
   backend.on('upgrade', (request, socket: Socket) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     const ticket = url.searchParams.get('ticket') ?? '';
-    if (url.pathname !== '/public-api/v1/messages/live' || !tickets.delete(ticket)) return void socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    const sessionId = tickets.get(ticket);
+    if (url.pathname !== '/public-api/v1/messages/live' || !sessionId) return void socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    tickets.delete(ticket);
     const accept = createHash('sha1').update(`${request.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     sockets.add(socket);
+    socketSessions.set(socket, sessionId);
     socket.on('close', () => sockets.delete(socket));
     socket.on('data', (data: Buffer) => { if (((data[0] ?? 0) & 0x0f) === 0x8) socket.end(Buffer.from([0x88, 0])); });
-    sendFrame(socket, { type: 'ready' });
+    // Hold the delayed session's `ready` frame so tests can control when its startup finishes.
+    if (sessionId === DELAYED) held.push(socket);
+    else sendFrame(socket, { type: 'ready' });
   });
   const backendAddress = backend.address();
   assert.ok(backendAddress && typeof backendAddress === 'object');
@@ -102,7 +114,7 @@ before(async () => {
   schemaPath = join(directory, 'openapi.json');
   await writeFile(schemaPath, JSON.stringify(liveSpec));
 });
-beforeEach(() => { bodies.length = 0; revoked = false; });
+beforeEach(() => { bodies.length = 0; revoked = false; refusals = 0; held.length = 0; });
 after(async () => {
   for (const socket of sockets) socket.destroy();
   await new Promise<void>((resolve) => mcp.close(() => resolve()));
@@ -203,6 +215,22 @@ describe('live session messages', () => {
       for (const socket of sockets) socket.destroy();
       assert.equal(await within(subscription.closed, 'subscription not closed after revocation'), 'graceful');
       assert.equal(sockets.size, 0);
+    } finally { await client.close(); }
+  });
+
+  it('rejects a stdio listen revoked while another session is still connecting', async () => {
+    const { client, transport } = stdioClient(true);
+    try {
+      await client.connect(transport);
+      const listen = client.listen({ resourceSubscriptions: [uri(SESSION), uri(DELAYED)] });
+      await waitFor(() => sockets.size === 2 && held.length === 1, 'upstream WebSockets not opened');
+      revoked = true;
+      for (const socket of sockets) if (socketSessions.get(socket) === SESSION) socket.destroy();
+      await waitFor(() => refusals > 0, 'reconnect not refused');
+      for (const socket of held) sendFrame(socket, { type: 'ready' });
+      await assert.rejects(within(listen, 'listen hung'), (error: Error) => error.message !== 'listen hung');
+      await waitFor(() => sockets.size === 0, 'upstream WebSockets not released');
+      assert.equal((await within(client.listTools(), 'stdio queue blocked')).tools.length, 3);
     } finally { await client.close(); }
   });
 
