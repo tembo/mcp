@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { serve } from '@hono/node-server';
-import { serveStdio } from '@modelcontextprotocol/server/stdio';
+import { StdioServerTransport, serveStdio } from '@modelcontextprotocol/server/stdio';
 import { createApp } from './app.js';
+import { withLiveSubscriptions } from './live.js';
 import { loadConfig, loadStdioConfig } from './config.js';
 import { createCatalog, loadOpenApi } from './openapi.js';
 import { createServer } from './server.js';
@@ -29,7 +30,11 @@ async function main() {
   } else {
     const config = loadStdioConfig();
     const catalog = await createCatalog(await loadOpenApi(config), config.apiUrl);
-    const server = serveStdio(() => createServer(catalog, { apiUrl: config.apiUrl, token: config.apiKey, mode: config.toolMode, allowWrites: values['allow-writes'] }), { onerror: () => console.error('MCP transport error') });
+    let instance: ReturnType<typeof createServer> | undefined;
+    const transport = withLiveSubscriptions(new StdioServerTransport(), { apiUrl: config.apiUrl, token: config.apiKey }, (uri) => {
+      instance?.sendResourceUpdated({ uri }).catch(() => console.error('MCP notification error'));
+    });
+    const server = serveStdio(() => (instance = createServer(catalog, { apiUrl: config.apiUrl, token: config.apiKey, mode: config.toolMode, allowWrites: values['allow-writes'] })), { transport, onerror: () => console.error('MCP transport error') });
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { void server.close().finally(() => process.exit(0)); });
   }
 }

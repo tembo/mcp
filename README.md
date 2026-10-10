@@ -26,6 +26,10 @@ For example, search for `sessions`, inspect a returned operation with `get_tool_
 
 `tools/list` paginates direct tools at 50 operations. Both modes reach the same public operations and enforce the same permissions. Tool results include structured `{ "data": ... }` output and a text representation for compatible clients; annotations are hints, not authorization rules.
 
+### Live session messages
+
+WebSocket operations cannot run as request/response tools, so they are served as MCP resources instead. Read `tembo://sessions/{sessionId}/messages` for a session's most recent messages. To follow changes, subscribe to that URI: `subscriptions/listen` with `resourceSubscriptions` on the `2026-07-28` protocol, or `resources/subscribe` on legacy stdio. The server authorizes each subscription with the caller's credentials, holds the API's live WebSocket while the subscription is open, and sends `notifications/resources/updated` whenever the messages change (including after a reconnect), so the client reads the resource again. At most 10 message URIs are allowed per subscription. Legacy HTTP connections are stateless and cannot receive updates; they can still read the resource.
+
 ## Run from source
 
 Requires Node.js 22 or newer.
@@ -122,7 +126,7 @@ This supports a later migration of public-API-backed agent tools; it does not re
 
 At startup the server reads the versioned `openapi/openapi.json` bundled in npm and Docker releases, without fetching a live schema. A maintained OpenAPI converter supplies operation metadata and request schemas; name abbreviation is disabled so operation names remain descriptive. Tool names are generated from OpenAPI operation IDs in lowercase kebab case (for example, `list-sessions`) and validated against the MCP tool-name grammar. Rename an operation in the OpenAPI contract rather than adding a handwritten MCP alias. The official MCP SDK supplies the protocol implementation. A shared adapter normalizes composed object schemas, validates arguments, and dispatches to the generated API client. No per-endpoint adapter is needed.
 
-Startup checks that all public operations generate unique tools. `npm run update:openapi` fetches the canonical public contract and validates coverage and schemas before updating the snapshot. The update workflow opens or updates a review PR on `production-api-deployed` repository dispatch, manual invocation on main, or a daily fallback. Unchanged schemas produce no diff. Merge the reviewed snapshot, then release/redeploy MCP; restarting an old release does not change its tools. SDK releases are independent.
+Startup checks that all public operations generate unique tools, except WebSocket handshakes (operations with a `101` response), which are served as resources. `npm run update:openapi` fetches the canonical public contract and validates coverage and schemas before updating the snapshot. The update workflow opens or updates a review PR on `production-api-deployed` repository dispatch, manual invocation on main, or a daily fallback. Unchanged schemas produce no diff. Merge the reviewed snapshot, then release/redeploy MCP; restarting an old release does not change its tools. SDK releases are independent.
 
 Automation requires the public CI GitHub App installed on this repository with contents and pull-request write permissions, `CI_PUBLIC_BOT_APP_ID` as a repository variable, and `CI_PUBLIC_BOT_PRIVATE_KEY` as a secret (reuse the SDK/docs bot). The companion monorepo workflow sends `production-api-deployed` independently to this repo and the SDK after a successful production API rollout. Its existing `CI_BOT_APP_ID`/`CI_BOT_PRIVATE_KEY` bot must also be installed on `tembo/mcp` with contents write permission to send that event. Until both PRs are merged and configured, use the manual schema-update trigger. npm publication remains separate.
 
