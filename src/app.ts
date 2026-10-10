@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { AuthenticationError, BASE_SCOPES, verifyIdentity } from './api.js';
 import type { Config } from './config.js';
+import { sessionIdFromUri, startLiveSubscriptions } from './live.js';
 import { createCatalog } from './openapi.js';
 import { createServer } from './server.js';
 
@@ -84,18 +85,65 @@ export async function createApp(config: Config, openapi: string) {
       return context.json({ error: status === 503 ? 'Tembo authentication temporarily unavailable' : 'Tembo authorization required' }, status);
     }
 
-    return handler.fetch(context.req.raw, {
-        authInfo: {
-          token,
-          clientId: 'clientId' in identity ? identity.clientId : 'principal' in identity ? 'tembo-agent' : 'tembo-api-key',
-          scopes: 'scopes' in identity ? identity.scopes : [],
-          ...('expiresAt' in identity ? { expiresAt: identity.expiresAt } : {}),
-          resource: publicUrl,
-          extra: { ...('userId' in identity ? { userId: identity.userId } : {}), organizationId: identity.organizationId,
-            ...('principal' in identity ? { agentOrganizationId: identity.organizationId } : {}) },
-        },
-    });
+    const authInfo = {
+      token,
+      clientId: 'clientId' in identity ? identity.clientId : 'principal' in identity ? 'tembo-agent' : 'tembo-api-key',
+      scopes: 'scopes' in identity ? identity.scopes : [],
+      ...('expiresAt' in identity ? { expiresAt: identity.expiresAt } : {}),
+      resource: publicUrl,
+      extra: { ...('userId' in identity ? { userId: identity.userId } : {}), organizationId: identity.organizationId,
+        ...('principal' in identity ? { agentOrganizationId: identity.organizationId } : {}) },
+    };
+    const mcpMethod = context.req.header('Mcp-Method');
+    const listen = context.req.method === 'POST' && (!mcpMethod || mcpMethod === 'subscriptions/listen') ? await readLiveListen(context.req.raw) : undefined;
+    if (!listen) return handler.fetch(context.req.raw, { authInfo });
+
+    const controller = new AbortController();
+    context.req.raw.signal.addEventListener('abort', () => controller.abort(), { once: true });
+    const credentials = { apiUrl: config.apiUrl, token, ...('principal' in identity ? { agentOrganizationId: identity.organizationId } : {}) };
+    const error = await startLiveSubscriptions(credentials, listen.uris, {
+      onChange: (uri) => handler.notify.resourceUpdated(uri),
+      onEnd: () => controller.abort(),
+    }, controller.signal);
+    if (error) return context.json({ jsonrpc: '2.0', id: listen.id, error: { code: -32602, message: error } });
+    const response = await handler.fetch(new Request(context.req.raw, { signal: controller.signal }), { authInfo });
+    return releaseWith(response, controller);
   });
   app.onError(() => new Response('Internal server error', { status: 500 }));
   return app;
+}
+
+/** A `subscriptions/listen` request naming Tembo message resources, which need an upstream watcher. */
+async function readLiveListen(request: Request): Promise<{ id: unknown; uris: string[] } | undefined> {
+  const message: unknown = await request.clone().json().catch(() => undefined);
+  if (!message || typeof message !== 'object' || !('method' in message) || message.method !== 'subscriptions/listen' || !('params' in message)) return undefined;
+  const params = message.params;
+  const notifications = params && typeof params === 'object' && 'notifications' in params ? params.notifications : undefined;
+  const requested = notifications && typeof notifications === 'object' && 'resourceSubscriptions' in notifications ? notifications.resourceSubscriptions : undefined;
+  const uris = Array.isArray(requested) ? requested.filter((uri): uri is string => typeof uri === 'string' && Boolean(sessionIdFromUri(uri))) : [];
+  return uris.length ? { id: 'id' in message ? message.id : null, uris } : undefined;
+}
+
+/** Stops the subscription's upstream watchers when its response stream ends or is cancelled. */
+function releaseWith(response: Response, controller: AbortController): Response {
+  if (!response.body) {
+    controller.abort();
+    return response;
+  }
+  const reader = response.body.getReader();
+  return new Response(new ReadableStream({
+    async pull(stream) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.abort();
+        stream.close();
+      } else {
+        stream.enqueue(value);
+      }
+    },
+    cancel(reason) {
+      controller.abort();
+      return reader.cancel(reason);
+    },
+  }), response);
 }
