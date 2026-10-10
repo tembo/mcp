@@ -14,6 +14,7 @@ import { loadConfig } from '../src/config.js';
 
 const SESSION = '11111111-1111-4111-8111-111111111111';
 const FORBIDDEN = '22222222-2222-4222-8222-222222222222';
+const REJECTED = '33333333-3333-4333-8333-333333333333';
 const uri = (sessionId: string) => `tembo://sessions/${sessionId}/messages`;
 const response = { '200': { description: 'Success', content: { 'application/json': { schema: { type: 'object' } } } } };
 const liveSpec = {
@@ -32,6 +33,7 @@ const liveSpec = {
 const sockets = new Set<Socket>();
 const tickets = new Map<string, string>();
 const bodies: unknown[] = [];
+let revoked = false;
 let backend: ReturnType<typeof serve>;
 let mcp: ReturnType<typeof serve>;
 let apiUrl: string;
@@ -63,6 +65,9 @@ before(async () => {
   upstream.post('/public-api/v1/messages/live', async (context) => {
     const { scope } = await context.req.json();
     if (scope.sessionId === FORBIDDEN) return context.json({ error: 'Session not found' }, 404);
+    if (revoked) return context.json({ error: 'Forbidden' }, 403);
+    // Issue a ticket the WebSocket endpoint will not accept, so the upgrade is rejected with 401.
+    if (scope.sessionId === REJECTED) return context.json({ ticket: 'unknown-ticket' });
     const ticket = randomUUID();
     tickets.set(ticket, scope.sessionId);
     return context.json({ ticket });
@@ -97,7 +102,7 @@ before(async () => {
   schemaPath = join(directory, 'openapi.json');
   await writeFile(schemaPath, JSON.stringify(liveSpec));
 });
-beforeEach(() => { bodies.length = 0; });
+beforeEach(() => { bodies.length = 0; revoked = false; });
 after(async () => {
   for (const socket of sockets) socket.destroy();
   await new Promise<void>((resolve) => mcp.close(() => resolve()));
@@ -115,6 +120,10 @@ function stdioClient(modern: boolean) {
   const client = new Client({ name: 'live-stdio-test', version: '1' }, modern ? { versionNegotiation: { mode: { pin: '2026-07-28' } } } : {});
   const transport = new StdioClientTransport({ command: process.execPath, args: ['--import', 'tsx', 'src/index.ts', '--allow-writes'], cwd: process.cwd(), env: { TEMBO_API_KEY: 'api-key', TEMBO_API_URL: apiUrl, MCP_OPENAPI_PATH: schemaPath }, stderr: 'pipe' });
   return { client, transport };
+}
+
+function within<T>(promise: Promise<T>, message: string) {
+  return Promise.race([promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), 5_000))]);
 }
 
 function updates(client: Client) {
@@ -169,6 +178,30 @@ describe('live session messages', () => {
     try {
       await client.connect(transport);
       await assert.rejects(client.listen({ resourceSubscriptions: [uri(FORBIDDEN)] }));
+      assert.equal(sockets.size, 0);
+    } finally { await client.close(); }
+  });
+
+  it('fails fast when the upstream WebSocket upgrade is rejected', async () => {
+    const { client, transport } = httpClient();
+    try {
+      await client.connect(transport);
+      await assert.rejects(within(client.listen({ resourceSubscriptions: [uri(REJECTED)] }), 'listen hung'), (error: Error) => error.message !== 'listen hung');
+      assert.equal(sockets.size, 0);
+    } finally { await client.close(); }
+  });
+
+  it('keeps stdio responsive after a rejected upgrade and closes listens when access is revoked', async () => {
+    const { client, transport } = stdioClient(true);
+    try {
+      await client.connect(transport);
+      await assert.rejects(within(client.listen({ resourceSubscriptions: [uri(REJECTED)] }), 'listen hung'), (error: Error) => error.message !== 'listen hung');
+      assert.equal((await within(client.listTools(), 'stdio queue blocked')).tools.length, 3);
+      const subscription = await client.listen({ resourceSubscriptions: [uri(SESSION)] });
+      await waitFor(() => sockets.size === 1, 'upstream WebSocket not opened');
+      revoked = true;
+      for (const socket of sockets) socket.destroy();
+      assert.equal(await within(subscription.closed, 'subscription not closed after revocation'), 'graceful');
       assert.equal(sockets.size, 0);
     } finally { await client.close(); }
   });
