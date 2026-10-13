@@ -20,6 +20,7 @@ export async function createApp(config: Config, openapi: string) {
     return createServer(catalog, { apiUrl: config.apiUrl, token: authInfo.token, mode: config.toolMode, allowWrites: true,
       agentOrganizationId: typeof authInfo.extra?.agentOrganizationId === 'string' ? authInfo.extra.agentOrganizationId : undefined });
   });
+  const notifyResource = (uri: string) => handler.notify.resourceUpdated(uri);
   const challenge = (error?: string, scopes?: string[]) => [
     config.issuer ? `Bearer resource_metadata="${metadataUrl}"` : 'Bearer realm="tembo"',
     ...(error ? [`error="${error}"`] : []),
@@ -102,7 +103,7 @@ export async function createApp(config: Config, openapi: string) {
     context.req.raw.signal.addEventListener('abort', () => controller.abort(), { once: true });
     const credentials = { apiUrl: config.apiUrl, token, ...('principal' in identity ? { agentOrganizationId: identity.organizationId } : {}) };
     const error = await startLiveSubscriptions(credentials, listen.uris, {
-      onChange: (uri) => handler.notify.resourceUpdated(uri),
+      onChange: notifyResource,
       onEnd: () => controller.abort(),
     }, controller.signal);
     if (error || controller.signal.aborted) {

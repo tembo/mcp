@@ -1,8 +1,9 @@
 import type { Transport } from '@modelcontextprotocol/server';
+import { watchSessionEvents } from './live-events.js';
 
 export const MESSAGES_URI_TEMPLATE = 'tembo://sessions/{sessionId}/messages';
 export const MAX_LIVE_SUBSCRIPTIONS = 10;
-const messagesUri = /^tembo:\/\/sessions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/messages$/;
+const messagesUri = /^tembo:\/\/sessions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(?:messages|events)$/;
 const RETRY_MIN_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
 
@@ -125,9 +126,11 @@ export async function startLiveSubscriptions(
   const watched = [...new Set(uris)].filter((uri) => sessionIdFromUri(uri));
   if (watched.length > MAX_LIVE_SUBSCRIPTIONS) return `At most ${MAX_LIVE_SUBSCRIPTIONS} Tembo message subscriptions are allowed per request`;
   const controller = new AbortController();
-  signal.addEventListener('abort', () => controller.abort(), { once: true });
-  const results = await Promise.allSettled(watched.map((uri) =>
-    watchSessionMessages(credentials, sessionIdFromUri(uri)!, { onChange: () => handlers.onChange(uri), onEnd: handlers.onEnd }, controller.signal)));
+  signal.addEventListener('abort', () => controller.abort(), { once: true, signal: controller.signal });
+  if (signal.aborted) controller.abort();
+  const results = await Promise.allSettled(watched.map((uri) => uri.endsWith('/events')
+    ? watchSessionEvents(credentials, sessionIdFromUri(uri)!, handlers, controller.signal)
+    : watchSessionMessages(credentials, sessionIdFromUri(uri)!, { onChange: () => handlers.onChange(uri), onEnd: handlers.onEnd }, controller.signal)));
   const failed = results.findIndex((result) => result.status === 'rejected');
   if (failed === -1) return undefined;
   controller.abort();

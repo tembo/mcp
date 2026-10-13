@@ -26,9 +26,21 @@ For example, search for `sessions`, inspect a returned operation with `get_tool_
 
 `tools/list` paginates direct tools at 50 operations. Both modes reach the same public operations and enforce the same permissions. Tool results include structured `{ "data": ... }` output and a text representation for compatible clients; annotations are hints, not authorization rules.
 
-### Live session messages
+### Live session output
 
-WebSocket operations cannot run as request/response tools, so they are served as MCP resources instead. Read `tembo://sessions/{sessionId}/messages` for a session's most recent messages. To follow changes, subscribe to that URI: `subscriptions/listen` with `resourceSubscriptions` on the `2026-07-28` protocol, or `resources/subscribe` on legacy stdio. The server authorizes each subscription with the caller's credentials, holds the API's live WebSocket while the subscription is open, and sends `notifications/resources/updated` whenever the messages change (including after a reconnect), so the client reads the resource again. At most 10 message URIs are allowed per subscription. Legacy HTTP connections are stateless and cannot receive updates; they can still read the resource.
+WebSocket handshakes are resources, not request/response tools. When the schema exposes `/v1/live`, subscribe to `tembo://sessions/{sessionId}/events`: `subscriptions/listen` with `resourceSubscriptions` on the `2026-07-28` protocol, or `resources/subscribe` on legacy stdio. The server obtains a ticket using the caller's credentials, waits for subscription-level authorization of `sessions.events`, and sends `notifications/resources/updated` for output deltas and reconnects.
+
+Read the resource after updates. Its JSON contains `recorded` (the latest REST event page) and `live` (`cursor`, `deltas`, `truncated`, `gap`). Each live delta has its own cursor and `{ type: 'delta', data: { event, message, ... } }` payload. The buffer makes actual provider output available before REST persistence; process cursors newer than the last one you read. It holds at most 100 deltas and 256 KiB per active credential/session scope. `truncated` or `gap` signals that readers must reconcile recorded events; this is not a durable replay stream. REST authorization is checked before returning any buffered content. Buffers are isolated by credentials and released when the last subscription ends.
+
+Fresh tickets and subscriptions are used on reconnect. Scoped refusals terminate the listen, including stdio. At most 10 session resource URIs are allowed per listen. Legacy HTTP is stateless and cannot receive updates; it can still read recorded events. Older schemas continue to expose the earlier `tembo://sessions/{sessionId}/messages` resource and watcher, so production is not switched before the API rollout.
+
+### Dev live smoke test
+
+Set `TEMBO_API_KEY` and `TEMBO_TEST_SESSION_ID`, then run `npm run test:dev:live`. It tests HTTP and stdio with the dev public schema, stored temporarily rather than replacing the production snapshot. `TEMBO_API_URL` defaults to `https://internal.tembo-development.com/public-api` for this test only; `MCP_OPENAPI_PATH` can supply another schema. Add `RUN_AGENT=1` to send a minimal prompt through the generated MCP tool, verify actual streamed tokens through resource reads, and stop the session afterward. Agent mode grants stdio writes for this test and incurs usage charges; use a dedicated test session.
+
+Add `FORCE_RECONNECT=1` in agent mode to disconnect the upstream socket after the first completed turn, verify the stream gap/reconnect notification, and stream a second turn on both transports. The reconnect hook is loaded only by this test, never by the normal server.
+
+The normal server and schema-update script still default to production. Explicit `TEMBO_OPENAPI_URL` and `TEMBO_API_URL` overrides allow a reviewed schema refresh for another environment; `npm run update:openapi` replaces the tracked snapshot, so do not use it merely to test dev.
 
 ## Run from source
 
