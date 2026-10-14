@@ -52,3 +52,15 @@ it('loads an explicit local snapshot and fails closed on missing or invalid file
     await rm(directory, { recursive: true });
   }
 });
+
+it('leaves out file upload and redirect-only download operations the JSON executor cannot serve', async () => {
+  const ok = { '200': { description: 'OK', content: { 'application/json': { schema: { type: 'object' } } } } };
+  const content = JSON.stringify({ openapi: '3.1.0', info: { title: 'Files', version: '1' }, paths: { '/v1/users/{userId}/profile-picture': {
+    get: { operationId: 'retrieveUserProfilePicture', parameters: [{ in: 'path', name: 'userId', required: true, schema: { type: 'string' } }], responses: { '302': { description: 'Redirect' } } },
+    put: { operationId: 'updateUserProfilePicture', parameters: [{ in: 'path', name: 'userId', required: true, schema: { type: 'string' } }],
+      requestBody: { content: { 'multipart/form-data': { schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } } } } } }, responses: ok },
+    delete: { operationId: 'deleteUserProfilePicture', parameters: [{ in: 'path', name: 'userId', required: true, schema: { type: 'string' } }], responses: ok },
+  } } });
+  const catalog = await createCatalog(content, 'https://api.example.com');
+  assert.deepEqual(catalog.entries.map((entry) => entry.tool.name), ['delete-user-profile-picture']);
+});
