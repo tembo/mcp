@@ -9,6 +9,9 @@ import { createCatalog } from './openapi.js';
 import { createServer } from './server.js';
 
 const MAX_MCP_REQUEST_SIZE = 12 * 1024 * 1024;
+// Upstream watches for different credentials receive the same delta at nearly the same time, and the
+// SDK's listen bus broadcasts by URI, so updates are coalesced per URI into one notification.
+const NOTIFY_COALESCE_MS = 25;
 
 export async function createApp(config: Config, openapi: string) {
   const app = new Hono();
@@ -20,7 +23,17 @@ export async function createApp(config: Config, openapi: string) {
     return createServer(catalog, { apiUrl: config.apiUrl, token: authInfo.token, mode: config.toolMode, allowWrites: true,
       agentOrganizationId: typeof authInfo.extra?.agentOrganizationId === 'string' ? authInfo.extra.agentOrganizationId : undefined });
   });
-  const notifyResource = (uri: string) => handler.notify.resourceUpdated(uri);
+  const pendingUpdates = new Set<string>();
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  const notifyResource = (uri: string) => {
+    pendingUpdates.add(uri);
+    flushTimer ??= setTimeout(() => {
+      flushTimer = undefined;
+      const uris = [...pendingUpdates];
+      pendingUpdates.clear();
+      for (const updated of uris) handler.notify.resourceUpdated(updated);
+    }, NOTIFY_COALESCE_MS);
+  };
   const challenge = (error?: string, scopes?: string[]) => [
     config.issuer ? `Bearer resource_metadata="${metadataUrl}"` : 'Bearer realm="tembo"',
     ...(error ? [`error="${error}"`] : []),
@@ -102,8 +115,11 @@ export async function createApp(config: Config, openapi: string) {
     const controller = new AbortController();
     context.req.raw.signal.addEventListener('abort', () => controller.abort(), { once: true });
     const credentials = { apiUrl: config.apiUrl, token, ...('principal' in identity ? { agentOrganizationId: identity.organizationId } : {}) };
+    // Changes before the SDK registers this listen stream would be broadcast to nobody, so hold them.
+    let starting = true;
+    const missed = new Set<string>();
     const error = await startLiveSubscriptions(credentials, listen.uris, {
-      onChange: notifyResource,
+      onChange: (uri) => { if (starting) missed.add(uri); else notifyResource(uri); },
       onEnd: () => controller.abort(),
     }, controller.signal);
     if (error || controller.signal.aborted) {
@@ -111,6 +127,8 @@ export async function createApp(config: Config, openapi: string) {
       return context.json({ jsonrpc: '2.0', id: listen.id, error: { code: -32602, message: error ?? 'Live updates ended before the subscription started' } });
     }
     const response = await handler.fetch(new Request(context.req.raw, { signal: controller.signal }), { authInfo });
+    starting = false;
+    for (const uri of missed) notifyResource(uri);
     return releaseWith(response, controller);
   });
   app.onError(() => new Response('Internal server error', { status: 500 }));

@@ -35,7 +35,9 @@ const isObject = (value: unknown): value is JsonObject => Boolean(value) && type
 
 /**
  * Adapts the public schema for tool generation. WebSocket handshakes (101 responses) cannot run as
- * HTTP tools and are served as subscribable resources instead. Object bodies without declared
+ * HTTP tools and are served as subscribable resources instead. Operations the JSON tool executor
+ * cannot serve (non-JSON request bodies such as file uploads, or redirect-only responses such as
+ * file downloads) are left out rather than exposed as broken tools. Object bodies without declared
  * properties get an explicit empty map so the generator accepts `{}` rather than a wrapped body.
  */
 export function prepareOpenApi(content: string): string {
@@ -45,11 +47,14 @@ export function prepareOpenApi(content: string): string {
     if (!isObject(item)) continue;
     for (const [method, operation] of Object.entries(item)) {
       if (!httpMethods.has(method) || !isObject(operation)) continue;
-      if (isObject(operation.responses) && '101' in operation.responses) {
+      const responses = isObject(operation.responses) ? Object.keys(operation.responses) : [];
+      const requestBody = operation.requestBody;
+      const nonJsonBody = isObject(requestBody) && isObject(requestBody.content) && !('application/json' in requestBody.content);
+      const redirectOnly = responses.some((status) => status.startsWith('3')) && !responses.some((status) => status.startsWith('2'));
+      if (responses.includes('101') || nonJsonBody || redirectOnly) {
         delete item[method];
         continue;
       }
-      const requestBody = operation.requestBody;
       const media = isObject(requestBody) && isObject(requestBody.content) ? requestBody.content['application/json'] : undefined;
       const schema = isObject(media) ? media.schema : undefined;
       if (isObject(schema) && schema.type === 'object' && !('properties' in schema) && !['allOf', 'anyOf', 'oneOf', '$ref'].some((key) => key in schema)) {

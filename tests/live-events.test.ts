@@ -34,6 +34,7 @@ let schemaPath: string;
 let revoked = false;
 let hold = false;
 let rejectUpgrade = false;
+let deltaOnReady = false;
 const tickets = new Set<string>();
 const issued: string[] = [];
 const connected: string[] = [];
@@ -115,6 +116,7 @@ before(async () => {
         else {
           sockets.set(socket, message.id);
           if (!hold) send(socket, { id: message.id, type: 'ready' });
+          if (!hold && deltaOnReady) send(socket, { id: message.id, type: 'event', data: delta() });
         }
       }
     });
@@ -132,7 +134,7 @@ before(async () => {
   await writeFile(schemaPath, JSON.stringify(spec));
 });
 
-beforeEach(() => { revoked = false; hold = false; rejectUpgrade = false; issued.length = 0; connected.length = 0; });
+beforeEach(() => { revoked = false; hold = false; rejectUpgrade = false; deltaOnReady = false; issued.length = 0; connected.length = 0; });
 after(async () => {
   for (const socket of sockets.keys()) socket.destroy();
   await new Promise<void>(resolve => mcp.close(() => resolve()));
@@ -175,6 +177,40 @@ for (const mode of ['http', 'stdio', 'legacy'] as const) {
     } finally { await client.close(); }
   });
 }
+
+it('delivers output that arrives while the HTTP listen is starting', async () => {
+  const { client, transport } = clientFor('http');
+  const updates: string[] = [];
+  client.setNotificationHandler('notifications/resources/updated', notification => { updates.push(notification.params.uri); });
+  deltaOnReady = true;
+  try {
+    await client.connect(transport);
+    const subscription = await client.listen({ resourceSubscriptions: [uri()] });
+    await waitFor(() => updates.length === 1, 'Startup output was never announced');
+    assert.deepEqual((await read(client)).live.deltas, [{ cursor: 1, data: delta() }]);
+    await subscription.close();
+    await waitFor(() => sockets.size === 0);
+  } finally { await client.close(); }
+});
+
+it('sends one update per delta when several credentials watch a session', async () => {
+  const clients = ['api-key-a', 'api-key-b', 'api-key-c'].map(token => ({ ...clientFor('http', token), updates: [] as string[] }));
+  try {
+    const subscriptions = [];
+    for (const entry of clients) {
+      entry.client.setNotificationHandler('notifications/resources/updated', notification => { entry.updates.push(notification.params.uri); });
+      await entry.client.connect(entry.transport);
+      subscriptions.push(await entry.client.listen({ resourceSubscriptions: [uri()] }));
+    }
+    await waitFor(() => [...sockets.values()].filter(Boolean).length === clients.length);
+    for (const [socket, id] of sockets) send(socket, { id, type: 'event', data: delta() });
+    await waitFor(() => clients.every(entry => entry.updates.length >= 1));
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.deepEqual(clients.map(entry => entry.updates.length), clients.map(() => 1));
+    for (const subscription of subscriptions) await subscription.close();
+    await waitFor(() => sockets.size === 0);
+  } finally { for (const entry of clients) await entry.client.close(); }
+});
 
 it('waits for subscription-level ready and fails scoped authorization cleanly', async () => {
   const { client, transport } = clientFor('http');
@@ -222,9 +258,14 @@ it('keeps buffers bounded, marks truncation, and isolates callers', async () => 
     await other.client.connect(other.transport);
     const subscription = await client.listen({ resourceSubscriptions: [uri()] });
     for (const [socket, id] of sockets) for (let index = 0; index < 110; index++) send(socket, { id, type: 'event', data: delta('x'.repeat(6000), index) });
-    await waitFor(() => updates.length === 110);
-    const snapshot = await read(client);
+    await waitFor(() => updates.length >= 1);
+    let snapshot = await read(client);
+    for (const deadline = Date.now() + 5000; snapshot.live.cursor < 110 && Date.now() < deadline;) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      snapshot = await read(client);
+    }
     assert.equal(snapshot.live.cursor, 110);
+    assert.ok(updates.length < 110, 'Bursts of deltas should be coalesced');
     assert.equal(snapshot.live.truncated, true);
     assert.ok(snapshot.live.deltas.length <= 100);
     assert.ok(Buffer.byteLength(JSON.stringify(snapshot.live.deltas)) < 270000);
