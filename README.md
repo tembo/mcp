@@ -32,7 +32,7 @@ WebSocket handshakes are resources, not request/response tools. When the schema 
 
 Read the resource after updates. Its JSON contains `recorded` (the latest REST event page) and `live` (`cursor`, `deltas`, `truncated`, `gap`). Each live delta has its own cursor and `{ type: 'delta', data: { event, message, ... } }` payload. The buffer makes actual provider output available before REST persistence; process cursors newer than the last one you read. It holds at most 100 deltas and 256 KiB per active credential/session scope. `truncated` or `gap` signals that readers must reconcile recorded events; this is not a durable replay stream. REST authorization is checked before returning any buffered content. Buffers are isolated by credentials and released when the last subscription ends.
 
-Fresh tickets and subscriptions are used on reconnect. Scoped refusals terminate the listen, including stdio. At most 10 session resource URIs are allowed per listen. Legacy HTTP is stateless and cannot receive updates; it can still read recorded events. Older schemas continue to expose the earlier `tembo://sessions/{sessionId}/messages` resource and watcher, so production is not switched before the API rollout.
+Fresh tickets and subscriptions are used on reconnect. Scoped refusals terminate the listen, including stdio. At most 10 session resource URIs are allowed per listen. Legacy HTTP is stateless and cannot receive updates; it can still read recorded events. The bundled production schema exposes `/v1/live`, so the server serves the events resource. Schemas without `/v1/live` fall back to the earlier `tembo://sessions/{sessionId}/messages` resource and watcher.
 
 ### Dev live smoke test
 
