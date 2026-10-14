@@ -24,7 +24,6 @@
     "start": "node dist/index.js --transport http",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "test:dev:live": "npm run build && tsx scripts/test-dev-live.ts",
     "check:coverage": "tsx scripts/check-coverage.ts",
     "update:openapi": "tsx scripts/update-openapi.ts",
     "prepack": "npm run build"

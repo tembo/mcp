@@ -36,7 +36,7 @@ Fresh tickets and subscriptions are used on reconnect. Scoped refusals terminate
 
 ### Dev live smoke test
 
-Set `TEMBO_API_KEY` and `TEMBO_TEST_SESSION_ID`, then run `npm run test:dev:live`. It tests HTTP and stdio with the dev public schema, stored temporarily rather than replacing the production snapshot. `TEMBO_API_URL` defaults to `https://internal.tembo-development.com/public-api` for this test only; `MCP_OPENAPI_PATH` can supply another schema. Add `RUN_AGENT=1` to send a minimal prompt through the generated MCP tool, verify actual streamed tokens through resource reads, and stop the session afterward. Agent mode grants stdio writes for this test and incurs usage charges; use a dedicated test session.
+Set `TEMBO_API_KEY` and `TEMBO_TEST_SESSION_ID`, then run `npx tsx --test tests/dev-live.test.ts` (it is skipped otherwise, including in `npm test`). It tests HTTP and stdio with the dev public schema, stored temporarily rather than replacing the production snapshot. `TEMBO_API_URL` defaults to `https://internal.tembo-development.com/public-api` for this test only; `MCP_OPENAPI_PATH` can supply another schema. Add `RUN_AGENT=1` to send a minimal prompt through the generated MCP tool, verify actual streamed tokens through resource reads, and stop the session afterward. Agent mode grants stdio writes for this test and incurs usage charges; use a dedicated test session.
 
 Add `FORCE_RECONNECT=1` in agent mode to disconnect the upstream socket after the first completed turn, verify the stream gap/reconnect notification, and stream a second turn on both transports. The reconnect hook is loaded only by this test, never by the normal server.
 
