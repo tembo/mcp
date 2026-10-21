@@ -22,7 +22,7 @@ export async function createApp(config: Config, openapi: string) {
     if (!authInfo) throw new Error('Missing verified identity');
     return createServer(catalog, { apiUrl: config.apiUrl, token: authInfo.token, mode: config.toolMode, allowWrites: true,
       agentOrganizationId: typeof authInfo.extra?.agentOrganizationId === 'string' ? authInfo.extra.agentOrganizationId : undefined });
-  });
+  }, { maxRequestBodySize: MAX_MCP_REQUEST_SIZE });
   const pendingUpdates = new Set<string>();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   const notifyResource = (uri: string) => {
