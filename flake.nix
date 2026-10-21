@@ -15,7 +15,7 @@
         pname = "tembo-mcp";
         version = "0.2.0";
         src = ./.;
-        npmDepsHash = "sha256-3fxJesCrMN080PEmAFDC1A9CcfJdaGzqFzodEKD9V1w=";
+        npmDepsHash = "sha256-luQJrdetMm0KCLDghQvgcAruwujGgnF32nCvZ5qykpE=";
         npmBuildScript = "build";
       };
     });
