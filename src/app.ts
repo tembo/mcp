@@ -102,7 +102,7 @@ export async function createApp(config: Config, openapi: string) {
     const authInfo = {
       token,
       clientId: 'clientId' in identity ? identity.clientId : 'principal' in identity ? 'tembo-agent' : 'tembo-api-key',
-      scopes: 'scopes' in identity ? identity.scopes : [],
+      scopes: 'scopes' in identity ? identity.scopes : 'apiKeyScopes' in identity ? identity.apiKeyScopes ?? [] : [],
       ...('expiresAt' in identity ? { expiresAt: identity.expiresAt } : {}),
       resource: publicUrl,
       extra: { ...('userId' in identity ? { userId: identity.userId } : {}), organizationId: identity.organizationId,
