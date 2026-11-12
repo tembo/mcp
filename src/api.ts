@@ -10,6 +10,8 @@ const scopeErrorSchema = z.object({
 const apiKeyIdentitySchema = z.object({
   userId: z.string().min(1),
   organizationId: z.string().min(1),
+  // Scoped keys; the Tembo API enforces them, so they are informational here.
+  apiKeyScopes: z.array(z.string()).optional(),
 }).strict();
 
 export const identitySchema = z.union([z.object({

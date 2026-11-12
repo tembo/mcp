@@ -34,6 +34,7 @@ before(async () => {
       return context.json({ principal: 'agent', organizationId });
     }
     if (token === 'Bearer api-key') return apiKeyRevoked ? context.json({}, 401) : context.json({ userId: 'apiKey', organizationId: 'org_a' });
+    if (token === 'Bearer scoped-api-key') return context.json({ userId: 'user_a', organizationId: 'org_a', apiKeyScopes: ['billing:read'] });
     if (token === 'Bearer partial-oauth') return context.json({ userId: 'user', organizationId: 'org_a', scopes: ['user:org:read'] });
     if (token === 'Bearer revoked') return context.json({}, 401);
     if (token === 'Bearer removed') return context.json({}, 403);
@@ -119,6 +120,13 @@ describe('OpenAPI-generated MCP', () => {
   it('does not reinterpret incomplete OAuth identities as API keys', async () => {
     assert.equal((await rpc('tools/list', {}, 'partial-oauth')).status, 503);
     assert.equal(requests.length, 0);
+  });
+
+  it('accepts scoped API keys without treating their scopes as OAuth scopes', async () => {
+    assert.equal((await rpc('tools/list', {}, 'scoped-api-key')).status, 200);
+    const response = await rpc('tools/call', { name: toolName('GET', '/v1/billing'), arguments: {} }, 'scoped-api-key');
+    assert.equal((await response.json()).result.isError, undefined);
+    assert.deepEqual(requests.map((request) => request.token), ['Bearer scoped-api-key']);
   });
 
   it('accepts API keys without OAuth scopes or expiry and forwards them for reads and writes', async () => {
